@@ -372,5 +372,10 @@ public class TestHelpers {
     public List<Long> splitOffsets() {
       return null;
     }
+
+    @Override
+    public byte[] serialize() throws IOException {
+      return new byte[0];
+    }
   }
 }

@@ -23,6 +23,8 @@ import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -30,8 +32,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import org.apache.avro.generic.IndexedRecord;
+import org.apache.avro.io.BinaryEncoder;
+import org.apache.avro.io.DatumWriter;
+import org.apache.avro.io.EncoderFactory;
 import org.apache.avro.specific.SpecificData;
 import org.apache.iceberg.avro.AvroSchemaUtil;
+import org.apache.iceberg.avro.GenericAvroWriter;
+import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.ByteBuffers;
@@ -271,6 +278,18 @@ class GenericDataFile
   }
 
   @Override
+  public byte[] serialize() throws IOException {
+    try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+      BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+      DatumWriter<DataFile> writer = new GenericAvroWriter<>(this.getSchema());
+
+      writer.write(this, encoder);
+      encoder.flush();
+      return out.toByteArray();
+    }
+  }
+
+  @Override
   public org.apache.avro.Schema getSchema() {
     if (avroSchema == null) {
       this.avroSchema = getAvroSchema(partitionType);
@@ -392,7 +411,7 @@ class GenericDataFile
     return javaClass.cast(get(pos));
   }
 
-  private static org.apache.avro.Schema getAvroSchema(Types.StructType partitionType) {
+  static org.apache.avro.Schema getAvroSchema(Types.StructType partitionType) {
     Types.StructType type = DataFile.getType(partitionType);
     return AvroSchemaUtil.convert(type, ImmutableMap.of(
         type, GenericDataFile.class.getName(),
@@ -420,6 +439,30 @@ class GenericDataFile
         .add("key_metadata", keyMetadata == null ? "null" : "(redacted)")
         .add("split_offsets", splitOffsets == null ? "null" : splitOffsets)
         .toString();
+  }
+
+  @Override
+  public boolean equals(Object that) {
+    if (that == null) {
+      return false;
+    }
+    if (!(that instanceof DataFile)) {
+      return false;
+    }
+    try {
+      return Arrays.equals(this.serialize(), ((DataFile) that).serialize());
+    } catch (IOException e) {
+      throw new RuntimeIOException(e);
+    }
+  }
+
+  @Override
+  public int hashCode() {
+    try {
+      return Arrays.hashCode(this.serialize());
+    } catch (IOException e) {
+      throw new RuntimeIOException(e);
+    }
   }
 
   @Override

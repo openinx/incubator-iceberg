@@ -19,6 +19,7 @@
 
 package org.apache.iceberg;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
@@ -126,7 +127,7 @@ public interface DataFile {
 
   /**
    * @return metadata about how this file is encrypted, or null if the file is stored in plain
-   *         text.
+   * text.
    */
   ByteBuffer keyMetadata();
 
@@ -152,4 +153,6 @@ public interface DataFile {
    * are determined by these offsets. The returned list must be sorted in ascending order.
    */
   List<Long> splitOffsets();
+
+  byte[] serialize() throws IOException;
 }

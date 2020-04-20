@@ -35,7 +35,7 @@ import org.apache.avro.io.ResolvingDecoder;
 import org.apache.iceberg.common.DynClasses;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 
-class GenericAvroReader<T> implements DatumReader<T> {
+public class GenericAvroReader<T> implements DatumReader<T> {
 
   private static final ThreadLocal<Map<Schema, Map<Schema, ResolvingDecoder>>> DECODER_CACHES =
       ThreadLocal.withInitial(() -> new MapMaker().weakKeys().makeMap());
@@ -45,7 +45,7 @@ class GenericAvroReader<T> implements DatumReader<T> {
   private Schema fileSchema = null;
   private ValueReader<T> reader = null;
 
-  GenericAvroReader(Schema readSchema) {
+  public GenericAvroReader(Schema readSchema) {
     this.readSchema = readSchema;
   }
 

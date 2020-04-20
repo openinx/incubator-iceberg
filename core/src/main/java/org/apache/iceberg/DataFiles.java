@@ -21,16 +21,22 @@ package org.apache.iceberg;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import org.apache.avro.io.BinaryDecoder;
+import org.apache.avro.io.DecoderFactory;
 import org.apache.hadoop.fs.FileStatus;
+import org.apache.iceberg.avro.GenericAvroReader;
 import org.apache.iceberg.encryption.EncryptedOutputFile;
 import org.apache.iceberg.encryption.EncryptionKeyMetadata;
 import org.apache.iceberg.hadoop.HadoopInputFile;
 import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.types.Conversions;
+import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.ByteBuffers;
 
 public class DataFiles {
@@ -163,6 +169,17 @@ public class DataFiles {
 
   public static DataFile fromManifestList(InputFile manifestList) {
     return new GenericDataFile(manifestList.location(), FileFormat.AVRO, 1, manifestList.getLength());
+  }
+
+  public static DataFile fromBinary(Types.StructType partitionType, byte[] buf, int offset, int len)
+      throws IOException {
+    try (ByteArrayInputStream in = new ByteArrayInputStream(buf, offset, len)) {
+      BinaryDecoder binaryDecoder = DecoderFactory.get().binaryDecoder(in, null);
+      org.apache.avro.Schema avroSchema = GenericDataFile.getAvroSchema(partitionType);
+      GenericAvroReader<GenericDataFile> reader = new GenericAvroReader<>(avroSchema);
+      reader.setSchema(avroSchema);
+      return reader.read(null, binaryDecoder);
+    }
   }
 
   public static Builder builder(PartitionSpec spec) {

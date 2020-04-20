@@ -258,6 +258,26 @@ public class TestLocalScan {
   }
 
   @Test
+  public void testSerialize() throws IOException {
+    List<Record> records = RandomGenericData.generate(SCHEMA, 1000, 123456L);
+    File location = temp.newFolder(format.name());
+    Assert.assertTrue(location.delete());
+    Table table = TABLES.create(SCHEMA, PartitionSpec.unpartitioned(),
+        ImmutableMap.of(TableProperties.DEFAULT_FILE_FORMAT, format.name()),
+        location.toString());
+    Assert.assertNotNull(table);
+
+    DataFile dataFile = writeFile(location.toString(), format.addExtension("file-1"), records);
+    byte[] buf = dataFile.serialize();
+    DataFile dataFile1 = DataFiles.fromBinary(
+        PartitionSpec.unpartitioned().partitionType(), buf, 0, buf.length);
+
+    byte[] buf2 = dataFile1.serialize();
+    Assert.assertArrayEquals(buf, buf2);
+    Assert.assertEquals(dataFile.toString(), dataFile1.toString());
+  }
+
+  @Test
   public void testFullScan() {
     Iterable<Record> results = IcebergGenerics.read(sharedTable).build();
 

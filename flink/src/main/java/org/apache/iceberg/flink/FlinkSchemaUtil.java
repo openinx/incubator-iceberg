@@ -17,29 +17,23 @@
  * under the License.
  */
 
-rootProject.name = 'iceberg'
-include 'api'
-include 'common'
-include 'core'
-include 'data'
-include 'flink'
-include 'orc'
-include 'parquet'
-include 'spark'
-include 'arrow'
-include 'spark-runtime'
-include 'pig'
-include 'hive'
+package org.apache.iceberg.flink;
 
-project(':api').name = 'iceberg-api'
-project(':common').name = 'iceberg-common'
-project(':core').name = 'iceberg-core'
-project(':data').name = 'iceberg-data'
-project(':flink').name = 'iceberg-flink'
-project(':orc').name = 'iceberg-orc'
-project(':arrow').name = 'iceberg-arrow'
-project(':parquet').name = 'iceberg-parquet'
-project(':spark').name = 'iceberg-spark'
-project(':spark-runtime').name = 'iceberg-spark-runtime'
-project(':pig').name = 'iceberg-pig'
-project(':hive').name = 'iceberg-hive'
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.types.Row;
+import org.apache.iceberg.Schema;
+
+public class FlinkSchemaUtil {
+
+  private FlinkSchemaUtil() {
+  }
+
+  public static void verifyTableSchema(TypeInformation<Row> flinkSchema, Schema schema) {
+    // TODO.
+  }
+
+  public static Schema convert(TypeInformation<Row> flinkSchema) {
+    // TODO implement this method.
+    return null;
+  }
+}
