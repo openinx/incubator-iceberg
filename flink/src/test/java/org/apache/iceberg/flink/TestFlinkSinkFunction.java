@@ -34,8 +34,8 @@ import java.util.List;
 import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.functions.AggregateFunction;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeinfo.Types;
+import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.operators.testutils.MockEnvironment;
 import org.apache.flink.runtime.taskexecutor.GlobalAggregateManager;
@@ -71,7 +71,7 @@ public class TestFlinkSinkFunction {
       )
   );
 
-  private static final TypeInformation<Row> FLINK_SCHEMA = Types.ROW(Types.STRING, Types.INT);
+  private static final RowTypeInfo FLINK_SCHEMA = (RowTypeInfo) Types.ROW(Types.STRING, Types.INT);
   private static final Record RECORD = GenericRecord.create(SCHEMA);
   private static final Comparator<Record> RECORD_CMP = (r1, r2) -> {
     int ret = StringUtils.compare((String) r1.getField("word"), (String) r2.getField("word"));

@@ -22,6 +22,7 @@ package org.apache.iceberg.parquet;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
@@ -159,5 +160,29 @@ public class ParquetTypeVisitor<T> {
 
   public T primitive(PrimitiveType primitive) {
     return null;
+  }
+
+  protected String[] currentPath() {
+    String[] path = new String[fieldNames.size()];
+    if (!fieldNames.isEmpty()) {
+      Iterator<String> iter = fieldNames.descendingIterator();
+      for (int i = 0; iter.hasNext(); i += 1) {
+        path[i] = iter.next();
+      }
+    }
+    return path;
+  }
+
+  protected String[] path(String name) {
+    String[] path = new String[fieldNames.size() + 1];
+    path[fieldNames.size()] = name;
+
+    if (!fieldNames.isEmpty()) {
+      Iterator<String> iter = fieldNames.descendingIterator();
+      for (int i = 0; iter.hasNext(); i += 1) {
+        path[i] = iter.next();
+      }
+    }
+    return path;
   }
 }

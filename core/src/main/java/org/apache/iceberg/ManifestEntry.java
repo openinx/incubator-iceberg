@@ -20,6 +20,7 @@
 package org.apache.iceberg;
 
 import com.google.common.base.MoreObjects;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
@@ -361,6 +362,11 @@ class ManifestEntry implements IndexedRecord, SpecificData.SchemaConstructable {
     @Override
     public List<Long> splitOffsets() {
       return wrapped.splitOffsets();
+    }
+
+    @Override
+    public byte[] serialize() throws IOException {
+      return wrapped.serialize();
     }
 
     @Override

@@ -76,6 +76,10 @@ public class ParquetValueWriters {
     return new BytesWriter(desc);
   }
 
+  public static PrimitiveWriter<byte[]> byteArrays(ColumnDescriptor desc) {
+    return new ByteArrayWriter(desc);
+  }
+
   public static <E> CollectionWriter<E> collections(int dl, int rl, ParquetValueWriter<E> writer) {
     return new CollectionWriter<>(dl, rl, writer);
   }
@@ -243,6 +247,17 @@ public class ParquetValueWriters {
       } else {
         column.writeBinary(repetitionLevel, Binary.fromString(value.toString()));
       }
+    }
+  }
+
+  private static class ByteArrayWriter extends PrimitiveWriter<byte[]> {
+    private ByteArrayWriter(ColumnDescriptor desc) {
+      super(desc);
+    }
+
+    @Override
+    public void write(int repetitionLevel, byte[] bytes) {
+      column.writeBinary(repetitionLevel, Binary.fromReusedByteArray(bytes));
     }
   }
 

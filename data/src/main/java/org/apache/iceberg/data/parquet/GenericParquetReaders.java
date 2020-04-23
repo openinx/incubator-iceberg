@@ -85,8 +85,8 @@ public class GenericParquetReaders {
     }
   }
 
-  private static class FallbackReadBuilder extends ReadBuilder {
-    FallbackReadBuilder(MessageType type, Map<Integer, ?> idToConstant) {
+  public static class FallbackReadBuilder extends ReadBuilder {
+    public FallbackReadBuilder(MessageType type, Map<Integer, ?> idToConstant) {
       super(type, idToConstant);
     }
 
@@ -116,11 +116,11 @@ public class GenericParquetReaders {
     }
   }
 
-  private static class ReadBuilder extends TypeWithSchemaVisitor<ParquetValueReader<?>> {
+  public static class ReadBuilder extends TypeWithSchemaVisitor<ParquetValueReader<?>> {
     private final MessageType type;
     private final Map<Integer, ?> idToConstant;
 
-    ReadBuilder(MessageType type, Map<Integer, ?> idToConstant) {
+    public ReadBuilder(MessageType type, Map<Integer, ?> idToConstant) {
       this.type = type;
       this.idToConstant = idToConstant;
     }
@@ -294,8 +294,12 @@ public class GenericParquetReaders {
       }
     }
 
-    MessageType type() {
+    protected MessageType type() {
       return type;
+    }
+
+    protected Map<Integer, ?> idToConstant() {
+      return idToConstant;
     }
 
     private String[] currentPath() {

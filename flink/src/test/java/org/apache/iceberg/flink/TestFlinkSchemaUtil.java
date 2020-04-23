@@ -19,12 +19,55 @@
 
 package org.apache.iceberg.flink;
 
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.typeutils.RowTypeInfo;
+import org.apache.iceberg.Schema;
+import org.apache.iceberg.types.Types;
+import org.junit.Assert;
 import org.junit.Test;
 
 public class TestFlinkSchemaUtil {
 
   @Test
   public void testConvertFlinkSchemaToIcebergSchema() {
-    // TODO
+    List<TypeInformation<?>> types = new ArrayList<>();
+    types.add(org.apache.flink.api.common.typeinfo.Types.INT);
+    types.add(org.apache.flink.api.common.typeinfo.Types.STRING);
+    types.add(org.apache.flink.api.common.typeinfo.Types.DOUBLE);
+    types.add(org.apache.flink.api.common.typeinfo.Types.MAP(
+        org.apache.flink.api.common.typeinfo.Types.STRING,
+        org.apache.flink.api.common.typeinfo.Types.ROW(
+            org.apache.flink.api.common.typeinfo.Types.DOUBLE,
+            org.apache.flink.api.common.typeinfo.Types.DOUBLE
+        )
+    ));
+    types.add(org.apache.flink.api.common.typeinfo.Types.OBJECT_ARRAY(
+        org.apache.flink.api.common.typeinfo.Types.STRING
+    ));
+    types.add(org.apache.flink.api.common.typeinfo.Types.PRIMITIVE_ARRAY(
+        org.apache.flink.api.common.typeinfo.Types.INT
+    ));
+
+    String[] fieldNames = new String[]{
+        "id", "name", "salary", "locations", "groupIds", "intArray"
+    };
+    RowTypeInfo flinkSchema = new RowTypeInfo(types.toArray(new TypeInformation[0]), fieldNames);
+    Schema actualSchema = FlinkSchemaUtil.convert(flinkSchema);
+    Schema expectedSchema = new Schema(
+        Types.NestedField.optional(0, "id", Types.IntegerType.get(), null),
+        Types.NestedField.optional(1, "name", Types.StringType.get(), null),
+        Types.NestedField.optional(2, "salary", Types.DoubleType.get(), null),
+        Types.NestedField.optional(3, "locations", Types.MapType.ofOptional(8, 9,
+            Types.StringType.get(),
+            Types.StructType.of(
+                Types.NestedField.optional(6, "f0", Types.DoubleType.get(), null),
+                Types.NestedField.optional(7, "f1", Types.DoubleType.get(), null)
+            ))),
+        Types.NestedField.optional(4, "groupIds", Types.ListType.ofOptional(10, Types.StringType.get())),
+        Types.NestedField.optional(5, "intArray", Types.ListType.ofOptional(11, Types.IntegerType.get()))
+    );
+    Assert.assertEquals(expectedSchema.toString(), actualSchema.toString());
   }
 }

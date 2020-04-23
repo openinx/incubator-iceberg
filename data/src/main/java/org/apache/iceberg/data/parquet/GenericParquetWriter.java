@@ -27,7 +27,6 @@ import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.Iterator;
 import java.util.List;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.parquet.ParquetTypeVisitor;
@@ -52,11 +51,15 @@ public class GenericParquetWriter {
     return (ParquetValueWriter<T>) ParquetTypeVisitor.visit(type, new WriteBuilder(type));
   }
 
-  private static class WriteBuilder extends ParquetTypeVisitor<ParquetValueWriter<?>> {
+  public static class WriteBuilder extends ParquetTypeVisitor<ParquetValueWriter<?>> {
     private final MessageType type;
 
-    WriteBuilder(MessageType type) {
+    public WriteBuilder(MessageType type) {
       this.type = type;
+    }
+
+    protected MessageType getMessageType() {
+      return this.type;
     }
 
     @Override
@@ -171,32 +174,6 @@ public class GenericParquetWriter {
         default:
           throw new UnsupportedOperationException("Unsupported type: " + primitive);
       }
-    }
-
-    private String[] currentPath() {
-      String[] path = new String[fieldNames.size()];
-      if (!fieldNames.isEmpty()) {
-        Iterator<String> iter = fieldNames.descendingIterator();
-        for (int i = 0; iter.hasNext(); i += 1) {
-          path[i] = iter.next();
-        }
-      }
-
-      return path;
-    }
-
-    private String[] path(String name) {
-      String[] path = new String[fieldNames.size() + 1];
-      path[fieldNames.size()] = name;
-
-      if (!fieldNames.isEmpty()) {
-        Iterator<String> iter = fieldNames.descendingIterator();
-        for (int i = 0; iter.hasNext(); i += 1) {
-          path[i] = iter.next();
-        }
-      }
-
-      return path;
     }
   }
 

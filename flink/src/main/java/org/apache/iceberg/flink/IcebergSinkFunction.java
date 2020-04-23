@@ -31,9 +31,9 @@ import org.apache.commons.compress.utils.Lists;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.api.java.ClosureCleaner;
+import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.core.io.SimpleVersionedSerialization;
 import org.apache.flink.runtime.state.CheckpointListener;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
@@ -47,7 +47,6 @@ import org.apache.flink.types.Row;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.MetricsConfig;
-import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.Tables;
 import org.apache.iceberg.avro.Avro;
@@ -76,10 +75,9 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
   private static final Logger LOG = LoggerFactory.getLogger(IcebergSinkFunction.class);
 
   private final String tableLocation;
-  private final TypeInformation<Row> schema;
+  private final RowTypeInfo schema;
 
   private transient Table table;
-  private transient Schema dstSchema;
   private transient FileFormat fileFormat;
   private transient GlobalTableCommitter globalCommitter;
 
@@ -105,7 +103,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
    * @param tableLocation What's the base path of the iceberg table.
    * @param schema        The defined Flink table schema.
    */
-  public IcebergSinkFunction(String tableLocation, TypeInformation<Row> schema) {
+  public IcebergSinkFunction(String tableLocation, RowTypeInfo schema) {
     this.tableLocation = tableLocation;
     this.schema = schema;
   }
@@ -124,7 +122,8 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
     // Initialize the hadoop table and scheam etc.
     Tables tables = new HadoopTables();
     this.table = tables.load(tableLocation);
-    this.dstSchema = FlinkSchemaUtil.convert(schema);
+    // Validate the FLINK schema.
+    FlinkSchemaUtil.convert(schema);
     this.fileFormat = getFileFormat();
 
     // Initialize the global table committer
@@ -260,7 +259,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
         switch (format) {
           case PARQUET:
             return Parquet.write(outputFile)
-                .createWriterFunc(msgType -> FlinkParquetWriters.buildWriter(dstSchema, msgType))
+                .createWriterFunc(FlinkParquetWriters::buildWriter)
                 .setAll(table.properties())
                 .metricsConfig(metricsConfig)
                 .schema(table.schema())

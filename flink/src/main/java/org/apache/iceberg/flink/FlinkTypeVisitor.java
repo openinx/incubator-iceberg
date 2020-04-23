@@ -19,33 +19,70 @@
 
 package org.apache.iceberg.flink;
 
+import com.google.common.collect.Lists;
 import java.util.List;
+import org.apache.flink.api.common.typeinfo.BasicArrayTypeInfo;
+import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-
+import org.apache.flink.api.java.typeutils.MapTypeInfo;
+import org.apache.flink.api.java.typeutils.ObjectArrayTypeInfo;
+import org.apache.flink.api.java.typeutils.RowTypeInfo;
 
 public class FlinkTypeVisitor<T> {
 
   static <T> T visit(TypeInformation<?> type, FlinkTypeVisitor<T> visitor) {
-    throw new UnsupportedOperationException("TODO: implement this method");
+    if (type instanceof RowTypeInfo) {
+      RowTypeInfo rowTypeInfo = (RowTypeInfo) type;
+      TypeInformation<?>[] types = rowTypeInfo.getFieldTypes();
+
+      List<T> fieldResults = Lists.newArrayListWithExpectedSize(types.length);
+      for (int i = 0; i < types.length; i++) {
+        fieldResults.add(visit(types[i], visitor));
+      }
+      return visitor.row(rowTypeInfo, fieldResults);
+    } else if (type instanceof BasicArrayTypeInfo) {
+      BasicArrayTypeInfo basicArrayTypeInfo = (BasicArrayTypeInfo) type;
+      return visitor.basicArray(basicArrayTypeInfo,
+          visit(basicArrayTypeInfo.getComponentInfo(), visitor));
+    } else if (type instanceof ObjectArrayTypeInfo) {
+      ObjectArrayTypeInfo objectArrayTypeInfo = (ObjectArrayTypeInfo) type;
+      return visitor.objectArray(objectArrayTypeInfo,
+          visit(objectArrayTypeInfo.getComponentInfo(), visitor));
+    } else if (type instanceof PrimitiveArrayTypeInfo) {
+      PrimitiveArrayTypeInfo primitiveArrayTypeInfo = (PrimitiveArrayTypeInfo) type;
+      return visitor.primitiveArray(primitiveArrayTypeInfo,
+          visit(primitiveArrayTypeInfo.getComponentType(), visitor));
+    } else if (type instanceof MapTypeInfo) {
+      MapTypeInfo mapTypeInfo = (MapTypeInfo) type;
+      return visitor.map(mapTypeInfo,
+          visit(mapTypeInfo.getKeyTypeInfo(), visitor),
+          visit(mapTypeInfo.getValueTypeInfo(), visitor));
+    } else {
+      return visitor.primitive(type);
+    }
   }
 
-  public T struct(TypeInformation<?> type, List<T> fieldResults) {
+  public T row(RowTypeInfo type, List<T> fieldResults) {
     return null;
   }
 
-  public T field(TypeInformation<?> type, T typeResult) {
+  public T basicArray(BasicArrayTypeInfo type, T elementResult) {
     return null;
   }
 
-  public T array(TypeInformation<?> type, T elementResult) {
+  public T objectArray(ObjectArrayTypeInfo type, T elementResult) {
     return null;
   }
 
-  public T map(TypeInformation<?> type, T keyResult, T valueResult) {
+  public T primitiveArray(PrimitiveArrayTypeInfo type, T elementResult) {
     return null;
   }
 
-  public T atomic(TypeInformation<?> type) {
+  public T map(MapTypeInfo type, T keyResult, T valueResult) {
+    return null;
+  }
+
+  public T primitive(TypeInformation type) {
     return null;
   }
 }

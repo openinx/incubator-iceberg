@@ -19,21 +19,17 @@
 
 package org.apache.iceberg.flink;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.types.Row;
+import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.types.Type;
 
 public class FlinkSchemaUtil {
 
   private FlinkSchemaUtil() {
   }
 
-  public static void verifyTableSchema(TypeInformation<Row> flinkSchema, Schema schema) {
-    // TODO.
-  }
-
-  public static Schema convert(TypeInformation<Row> flinkSchema) {
-    // TODO implement this method.
-    return null;
+  public static Schema convert(RowTypeInfo flinkSchema) {
+    Type converted = FlinkTypeVisitor.visit(flinkSchema, new FlinkTypeToType(flinkSchema));
+    return new Schema(converted.asNestedType().asStructType().fields());
   }
 }
