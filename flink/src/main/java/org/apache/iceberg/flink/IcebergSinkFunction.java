@@ -44,6 +44,7 @@ import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.types.Row;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.MetricsConfig;
@@ -57,6 +58,7 @@ import org.apache.iceberg.flink.writer.DynamicPartitionWriter;
 import org.apache.iceberg.flink.writer.FileAppenderFactory;
 import org.apache.iceberg.flink.writer.PartitionedWriter;
 import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.hadoop.SerializableConfiguration;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
@@ -75,6 +77,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
   private static final Logger LOG = LoggerFactory.getLogger(IcebergSinkFunction.class);
 
   private final String tableLocation;
+  private final SerializableConfiguration hadoopConf;
   private final RowTypeInfo schema;
 
   private transient Table table;
@@ -104,8 +107,27 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
    * @param schema        The defined Flink table schema.
    */
   public IcebergSinkFunction(String tableLocation, RowTypeInfo schema) {
+    this(tableLocation, schema, new Configuration());
+  }
+
+  /**
+   * TODO Need to validate the Flink schema and iceberg schema.
+   * NOTICE don't do any initialization work in this constructor, because in {@link DataStream#addSink(SinkFunction)}
+   * it will call {@link ClosureCleaner#clean(Object, ExecutionConfig.ClosureCleanerLevel, boolean)} to set all the
+   * non-serializable inner members to be null.
+   *
+   * @param tableLocation What's the base path of the iceberg table.
+   * @param schema        The defined Flink table schema.
+   * @param conf          The distribute table configuration.
+   */
+  public IcebergSinkFunction(String tableLocation, RowTypeInfo schema, Configuration conf) {
     this.tableLocation = tableLocation;
     this.schema = schema;
+    if (conf == null) {
+      this.hadoopConf = new SerializableConfiguration(new Configuration());
+    } else {
+      this.hadoopConf = new SerializableConfiguration(conf);
+    }
   }
 
   /**
@@ -120,7 +142,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
 
     // TODO Let the hadoop tables can run on hadoop distributed file system.
     // Initialize the hadoop table and scheam etc.
-    Tables tables = new HadoopTables();
+    Tables tables = new HadoopTables(hadoopConf.get());
     this.table = tables.load(tableLocation);
     // Validate the FLINK schema.
     FlinkSchemaUtil.convert(schema);
@@ -129,7 +151,8 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
     // Initialize the global table committer
     this.globalCommitter = new GlobalTableCommitter(
         (StreamingRuntimeContext) this.getRuntimeContext(),
-        tableLocation
+        tableLocation,
+        hadoopConf
     );
 
     // Initialize the PartitionWriter instance.

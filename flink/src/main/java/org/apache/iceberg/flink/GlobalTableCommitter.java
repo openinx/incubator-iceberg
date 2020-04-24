@@ -32,10 +32,12 @@ import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.runtime.taskexecutor.GlobalAggregateManager;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.table.api.TableException;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.hadoop.SerializableConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,12 +50,13 @@ class GlobalTableCommitter {
   private final GlobalCommitFunction commitFunction;
   private final int taskId;
 
-  GlobalTableCommitter(StreamingRuntimeContext context, String tableIdentifier) {
+  GlobalTableCommitter(StreamingRuntimeContext context, String tableIdentifier, SerializableConfiguration hadoopConf) {
     this.aggregateManager = context.getGlobalAggregateManager();
     this.taskId = context.getIndexOfThisSubtask();
     this.commitFunction = new GlobalCommitFunction(
         context.getNumberOfParallelSubtasks(),
-        tableIdentifier
+        tableIdentifier,
+        hadoopConf
     );
   }
 
@@ -65,8 +68,8 @@ class GlobalTableCommitter {
     );
   }
 
-  static long getMaxCommittedCheckpointId(String tableIdentifier) {
-    HadoopTables tables = new HadoopTables();
+  static long getMaxCommittedCheckpointId(String tableIdentifier, Configuration conf) {
+    HadoopTables tables = new HadoopTables(conf);
     Table table = tables.load(tableIdentifier);
     if (table.currentSnapshot() != null) {
       String value = table.currentSnapshot().summary().get(FLINK_MAX_COMMITTED_CHECKPOINT_ID);
@@ -82,11 +85,13 @@ class GlobalTableCommitter {
     private final int numberOfTasks;
     private final String tableIdentifier;
     private long maxCommittedCheckpointId = -1L;
+    private SerializableConfiguration hadoopConf;
 
-    GlobalCommitFunction(int numberOfTasks, String tableIdentifier) {
+    GlobalCommitFunction(int numberOfTasks, String tableIdentifier, SerializableConfiguration hadoopConf) {
       this.numberOfTasks = numberOfTasks;
       this.tableIdentifier = tableIdentifier;
-      this.maxCommittedCheckpointId = getMaxCommittedCheckpointId(tableIdentifier);
+      this.hadoopConf = hadoopConf;
+      this.maxCommittedCheckpointId = getMaxCommittedCheckpointId(tableIdentifier, hadoopConf.get());
     }
 
     @Override
@@ -117,7 +122,7 @@ class GlobalTableCommitter {
       }
       LOG.info("Committing to iceberg table: {}, the max checkpoint id: {}", tableIdentifier, ckpId);
       // TODO support hive tables ??? distributed HDFS ???
-      HadoopTables tables = new HadoopTables();
+      HadoopTables tables = new HadoopTables(hadoopConf.get());
       Table icebergTable = tables.load(this.tableIdentifier);
       AppendFiles appendFiles = icebergTable.newAppend();
       // Attach the MAX committed checkpoint id to the Iceberg table's properties.

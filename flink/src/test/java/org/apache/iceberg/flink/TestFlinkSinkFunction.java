@@ -44,6 +44,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.InstantiationUtil;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
@@ -187,14 +188,14 @@ public class TestFlinkSinkFunction {
 
       snapshot = testHarness.snapshot(1L, 1L);
       Assert.assertEquals(4L, countDataFiles());
-      Assert.assertEquals(-1L, GlobalTableCommitter.getMaxCommittedCheckpointId(tableLocation));
+      Assert.assertEquals(-1L, GlobalTableCommitter.getMaxCommittedCheckpointId(tableLocation, new Configuration()));
 
       testHarness.processElement(new StreamRecord<>(Row.of("flink", 5), 1L));
       testHarness.processElement(new StreamRecord<>(Row.of("iceberg", 6), 1L));
 
       testHarness.notifyOfCompletedCheckpoint(1L);
       Assert.assertEquals(6L, countDataFiles());
-      Assert.assertEquals(1L, GlobalTableCommitter.getMaxCommittedCheckpointId(tableLocation));
+      Assert.assertEquals(1L, GlobalTableCommitter.getMaxCommittedCheckpointId(tableLocation, new Configuration()));
       testHarness.snapshot(2L, 1L);
 
       // Full scan the local table.
@@ -216,7 +217,7 @@ public class TestFlinkSinkFunction {
       testHarness.snapshot(3L, 1L);
       Assert.assertEquals(8L, countDataFiles());
       testHarness.notifyOfCompletedCheckpoint(3L);
-      Assert.assertEquals(3L, GlobalTableCommitter.getMaxCommittedCheckpointId(tableLocation));
+      Assert.assertEquals(3L, GlobalTableCommitter.getMaxCommittedCheckpointId(tableLocation, new Configuration()));
 
       // Full scan the local table.
       checkTableRecords(Lists.newArrayList(
