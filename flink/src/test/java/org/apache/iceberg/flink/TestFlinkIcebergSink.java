@@ -74,11 +74,20 @@ public class TestFlinkIcebergSink extends AbstractTestBase {
   }
 
   @Test
-  public void testDataStream() throws Exception {
+  public void testDataStreamParallelism() throws Exception {
+    testDataStream(1);
+  }
+
+  @Test
+  public void testDataStreamMultiParallelism() throws Exception {
+    testDataStream(3);
+  }
+
+  private void testDataStream(int parallelism) throws Exception {
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
     // Enable the checkpoint.
     env.enableCheckpointing(100);
-    env.setParallelism(1);
+    env.setParallelism(parallelism);
 
     RowTypeInfo flinkSchema = new RowTypeInfo(
         org.apache.flink.api.common.typeinfo.Types.STRING,

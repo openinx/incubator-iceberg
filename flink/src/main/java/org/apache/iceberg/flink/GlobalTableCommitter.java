@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import org.apache.commons.compress.utils.Lists;
@@ -80,31 +81,29 @@ class GlobalTableCommitter {
   }
 
   private static class GlobalCommitFunction implements
-      AggregateFunction<CommitAggregateValue, NavigableMap<Long, CpAccumulator>, Long> {
+      AggregateFunction<CommitAggregateValue, GlobalJobState, Long> {
 
     private final int numberOfTasks;
     private final String tableIdentifier;
-    private long maxCommittedCheckpointId = -1L;
     private SerializableConfiguration hadoopConf;
 
     GlobalCommitFunction(int numberOfTasks, String tableIdentifier, SerializableConfiguration hadoopConf) {
       this.numberOfTasks = numberOfTasks;
       this.tableIdentifier = tableIdentifier;
       this.hadoopConf = hadoopConf;
-      this.maxCommittedCheckpointId = getMaxCommittedCheckpointId(tableIdentifier, hadoopConf.get());
     }
 
     @Override
-    public NavigableMap<Long, CpAccumulator> createAccumulator() {
-      return new TreeMap<>();
+    public GlobalJobState createAccumulator() {
+      return new GlobalJobState(getMaxCommittedCheckpointId(tableIdentifier, hadoopConf.get()));
     }
 
     @Override
-    public NavigableMap<Long, CpAccumulator> add(CommitAggregateValue value,
-                                                 NavigableMap<Long, CpAccumulator> accumulator) {
+    public GlobalJobState add(CommitAggregateValue value, GlobalJobState globalJobState) {
+      NavigableMap<Long, CpAccumulator> accumulator = globalJobState.accumulator;
       for (Map.Entry<Long, List<DataFile>> entry : value.pendingDataFiles.entrySet()) {
         long checkpointId = entry.getKey();
-        if (checkpointId > maxCommittedCheckpointId) {
+        if (checkpointId > globalJobState.maxCommittedCheckpointId) {
           accumulator.compute(checkpointId, (cpId, cpAcc) -> {
             cpAcc = cpAcc == null ? new CpAccumulator() : cpAcc;
             cpAcc.add(value.taskId, entry.getValue());
@@ -112,12 +111,13 @@ class GlobalTableCommitter {
           });
         }
       }
-      return accumulator;
+      return globalJobState;
     }
 
     private void commitUpToTable(long ckpId, Collection<DataFile> dataFiles) {
       if (dataFiles.size() == 0) {
-        LOG.info("Skip to commit table: {} because there's no data file to commit now", tableIdentifier);
+        LOG.info("Skip to commit table: {}, checkpointId: {} because there's no data file to commit now",
+            tableIdentifier, ckpId);
         return;
       }
       LOG.info("Committing to iceberg table: {}, the max checkpoint id: {}", tableIdentifier, ckpId);
@@ -129,20 +129,23 @@ class GlobalTableCommitter {
       appendFiles.set(FLINK_MAX_COMMITTED_CHECKPOINT_ID, Long.toString(ckpId));
       dataFiles.forEach(appendFiles::appendFile);
       appendFiles.commit();
+      LOG.info("Finished to commit iceberg table with the checkpoint id: {}, data file size: {}.",
+          ckpId, dataFiles.size());
     }
 
     @Override
-    public Long getResult(NavigableMap<Long, CpAccumulator> accumulator) {
-      Long commitCpId = accumulator
+    public Long getResult(GlobalJobState globalJobState) {
+      Optional<Long> allTasksFinishedMaxCkpId = globalJobState.accumulator
           .descendingMap()
           .entrySet()
           .stream()
           .filter(entry -> entry.getValue().taskIds.size() == numberOfTasks)
           .findFirst()
-          .map(Map.Entry::getKey)
-          .orElse(-1L);
-      if (commitCpId > 0) {
-        NavigableMap<Long, CpAccumulator> acc = accumulator.headMap(commitCpId, true);
+          .map(Map.Entry::getKey);
+      Long commitCpId;
+      if (allTasksFinishedMaxCkpId.isPresent()) {
+        commitCpId = allTasksFinishedMaxCkpId.get();
+        NavigableMap<Long, CpAccumulator> acc = globalJobState.accumulator.headMap(commitCpId, true);
         List<DataFile> filesToCommit = Lists.newArrayList();
         acc.values()
             .stream()
@@ -152,29 +155,47 @@ class GlobalTableCommitter {
         try {
           commitUpToTable(commitCpId, filesToCommit);
           acc.clear();
-          maxCommittedCheckpointId = commitCpId;
         } catch (Exception e) {
           throw new TableException("Failed to commit to iceberg table " +
               tableIdentifier + " for checkpointId " + commitCpId, e);
         }
+      } else {
+        commitCpId = getMaxCommittedCheckpointId(tableIdentifier, hadoopConf.get());
       }
+      globalJobState.maxCommittedCheckpointId = commitCpId;
       // The max committed checkpoint id will be used for clearing the complete files cache for each task.
-      return maxCommittedCheckpointId;
+      return globalJobState.maxCommittedCheckpointId;
     }
 
     @Override
-    public NavigableMap<Long, CpAccumulator> merge(NavigableMap<Long, CpAccumulator> accumulator,
-                                                   NavigableMap<Long, CpAccumulator> b) {
-      b.forEach((cpId, acc) -> {
-        if (cpId > maxCommittedCheckpointId) {
-          accumulator.compute(cpId, (key, preAcc) -> {
+    public GlobalJobState merge(GlobalJobState globalJobState,
+                                GlobalJobState b) {
+      b.accumulator.forEach((cpId, acc) -> {
+        if (cpId > globalJobState.maxCommittedCheckpointId) {
+          globalJobState.accumulator.compute(cpId, (key, preAcc) -> {
             preAcc = preAcc == null ? new CpAccumulator() : preAcc;
             preAcc.merge(acc);
             return preAcc;
           });
         }
       });
-      return accumulator;
+      return globalJobState;
+    }
+  }
+
+  /**
+   * GlobalJobState is the state of a running aggregation, this state maintains
+   * in the jobManager side, and contains pending files from all subTasks.
+   */
+  private static class GlobalJobState implements Serializable {
+    // the max committed checkpoint id in iceberg table.
+    private long maxCommittedCheckpointId;
+    // this map keys mean checkpoint id.
+    private final NavigableMap<Long, CpAccumulator> accumulator;
+
+    GlobalJobState(long maxCheckpointId) {
+      accumulator = new TreeMap<>();
+      maxCommittedCheckpointId = maxCheckpointId;
     }
   }
 
