@@ -170,8 +170,10 @@ project(':iceberg-flink') {
     compile project(':iceberg-arrow')
     compile "org.apache.flink:flink-streaming-java_2.11::tests"
 
-    compileOnly "org.apache.flink:flink-table-api-java-bridge_2.11"
     compileOnly "org.apache.flink:flink-streaming-java_2.11"
+    compileOnly "org.apache.flink:flink-table-api-java-bridge_2.11"
+    compileOnly "org.apache.flink:flink-table-planner-blink_2.11"
+    compileOnly "org.apache.flink:flink-table-planner_2.11"
     compileOnly "org.apache.hadoop:hadoop-hdfs"
     compileOnly "org.apache.hadoop:hadoop-common"
     compileOnly("org.apache.hadoop:hadoop-minicluster") {

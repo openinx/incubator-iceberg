@@ -33,6 +33,7 @@ import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.api.java.ClosureCleaner;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.core.io.SimpleVersionedSerialization;
 import org.apache.flink.runtime.state.CheckpointListener;
@@ -71,7 +72,8 @@ import static org.apache.iceberg.TableProperties.DEFAULT_FILE_FORMAT_DEFAULT;
 import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES;
 import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES_DEFAULT;
 
-public class IcebergSinkFunction extends RichSinkFunction<Row> implements CheckpointedFunction, CheckpointListener {
+public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
+    implements CheckpointedFunction, CheckpointListener {
 
   private static final long serialVersionUID = 1L;
   private static final Logger LOG = LoggerFactory.getLogger(IcebergSinkFunction.class);
@@ -104,7 +106,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
    * non-serializable inner members to be null.
    *
    * @param tableLocation What's the base path of the iceberg table.
-   * @param schema        The defined Flink table schema.
+   * @param schema        The defined Flink table schema. TODO Better to use the new FLINK API: TableSchema.
    */
   public IcebergSinkFunction(String tableLocation, RowTypeInfo schema) {
     this(tableLocation, schema, new Configuration());
@@ -176,8 +178,12 @@ public class IcebergSinkFunction extends RichSinkFunction<Row> implements Checkp
   }
 
   @Override
-  public void invoke(Row row, SinkFunction.Context context) throws Exception {
-    this.writer.write(row);
+  public void invoke(Tuple2<Boolean, Row> tuple, SinkFunction.Context context) throws Exception {
+    if (tuple.f0) {
+      this.writer.write(tuple.f1);
+    } else {
+      throw new UnsupportedOperationException("Not support DELETE yet.");
+    }
   }
 
   @Override

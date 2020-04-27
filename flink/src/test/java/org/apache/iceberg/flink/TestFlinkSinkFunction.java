@@ -30,11 +30,11 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.api.common.typeinfo.Types;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.operators.testutils.MockEnvironment;
@@ -49,7 +49,6 @@ import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.data.GenericRecord;
-import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.junit.Assert;
@@ -79,7 +78,7 @@ public class TestFlinkSinkFunction {
     if (ret != 0) {
       return ret;
     }
-    return ((Integer) r1.getField("count")) - ((Integer) r2.getField("count"));
+    return Integer.compare((Integer) r1.getField("count"), (Integer) r2.getField("count"));
   };
 
   @Rule
@@ -114,11 +113,10 @@ public class TestFlinkSinkFunction {
     field.set(obj, newValue);
   }
 
-  private OneInputStreamOperatorTestHarness<Row, Object> createSink() throws Exception {
+  private OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> createStreamSink() throws Exception {
     IcebergSinkFunction sink = new IcebergSinkFunction(tableLocation, FLINK_SCHEMA);
-    OneInputStreamOperatorTestHarness<Row, Object> testHarness = new OneInputStreamOperatorTestHarness<>(
-        new StreamSink<>(sink),
-        1, 1, 0);
+    OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> testHarness =
+        new OneInputStreamOperatorTestHarness<>(new StreamSink<>(sink), 1, 1, 0);
     MockEnvironment env = testHarness.getEnvironment();
     Field aggManagerField = MockEnvironment.class.getDeclaredField("aggregateManager");
     // The default TestGlobalAggregateManager won't accumulate the new committed value, which won't produce the
@@ -130,7 +128,7 @@ public class TestFlinkSinkFunction {
 
   @Test
   public void testClosingWithoutInput() throws Exception {
-    try (OneInputStreamOperatorTestHarness<Row, Object> testHarness = createSink()) {
+    try (OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> testHarness = createStreamSink()) {
       testHarness.setup();
       testHarness.open();
     }
@@ -143,16 +141,20 @@ public class TestFlinkSinkFunction {
         .count();
   }
 
+  private static StreamRecord<Tuple2<Boolean, Row>> createRecord(long timestamp, Object... values) {
+    return new StreamRecord<>(Tuple2.of(true, Row.of(values)), timestamp);
+  }
+
   @Test
   public void testTableCommit() throws Exception {
-    try (OneInputStreamOperatorTestHarness<Row, Object> testHarness = createSink()) {
+    try (OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> testHarness = createStreamSink()) {
       testHarness.setup();
       testHarness.open();
 
-      testHarness.processElement(new StreamRecord<>(Row.of("hello", 1), 1L));
-      testHarness.processElement(new StreamRecord<>(Row.of("world", 2), 1L));
-      testHarness.processElement(new StreamRecord<>(Row.of("foo", 3), 1L));
-      testHarness.processElement(new StreamRecord<>(Row.of("bar", 4), 1L));
+      testHarness.processElement(createRecord(1L, "hello", 1));
+      testHarness.processElement(createRecord(1L, "world", 2));
+      testHarness.processElement(createRecord(1L, "foo", 3));
+      testHarness.processElement(createRecord(1L, "bar", 4));
 
       testHarness.snapshot(1L, 1L);
       Assert.assertEquals(4L, countDataFiles());
@@ -165,33 +167,33 @@ public class TestFlinkSinkFunction {
 
       // Full scan the local table.
 
-      checkTableRecords(Lists.newArrayList(
+      TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
           RECORD.copy(ImmutableMap.of("word", "hello", "count", 1)),
           RECORD.copy(ImmutableMap.of("word", "world", "count", 2)),
           RECORD.copy(ImmutableMap.of("word", "foo", "count", 3)),
           RECORD.copy(ImmutableMap.of("word", "bar", "count", 4))
-      ));
+      ), RECORD_CMP);
     }
   }
 
   @Test
   public void testRecovery() throws Exception {
     OperatorSubtaskState snapshot;
-    try (OneInputStreamOperatorTestHarness<Row, Object> testHarness = createSink()) {
+    try (OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> testHarness = createStreamSink()) {
       testHarness.setup();
       testHarness.open();
 
-      testHarness.processElement(new StreamRecord<>(Row.of("hello", 1), 1L));
-      testHarness.processElement(new StreamRecord<>(Row.of("world", 2), 1L));
-      testHarness.processElement(new StreamRecord<>(Row.of("foo", 3), 1L));
-      testHarness.processElement(new StreamRecord<>(Row.of("bar", 4), 1L));
+      testHarness.processElement(createRecord(1L, "hello", 1));
+      testHarness.processElement(createRecord(1L, "world", 2));
+      testHarness.processElement(createRecord(1L, "foo", 3));
+      testHarness.processElement(createRecord(1L, "bar", 4));
 
       snapshot = testHarness.snapshot(1L, 1L);
       Assert.assertEquals(4L, countDataFiles());
       Assert.assertEquals(-1L, GlobalTableCommitter.getMaxCommittedCheckpointId(tableLocation, new Configuration()));
 
-      testHarness.processElement(new StreamRecord<>(Row.of("flink", 5), 1L));
-      testHarness.processElement(new StreamRecord<>(Row.of("iceberg", 6), 1L));
+      testHarness.processElement(createRecord(1L, "flink", 5));
+      testHarness.processElement(createRecord(1L, "iceberg", 6));
 
       testHarness.notifyOfCompletedCheckpoint(1L);
       Assert.assertEquals(6L, countDataFiles());
@@ -199,20 +201,20 @@ public class TestFlinkSinkFunction {
       testHarness.snapshot(2L, 1L);
 
       // Full scan the local table.
-      checkTableRecords(Lists.newArrayList(
+      TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
           RECORD.copy(ImmutableMap.of("word", "hello", "count", 1)),
           RECORD.copy(ImmutableMap.of("word", "world", "count", 2)),
           RECORD.copy(ImmutableMap.of("word", "foo", "count", 3)),
           RECORD.copy(ImmutableMap.of("word", "bar", "count", 4))
-      ));
+      ), RECORD_CMP);
     }
-    try (OneInputStreamOperatorTestHarness<Row, Object> testHarness = createSink()) {
+    try (OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> testHarness = createStreamSink()) {
       testHarness.setup();
       testHarness.initializeState(snapshot);
       testHarness.open();
 
-      testHarness.processElement(new StreamRecord<>(Row.of("tail", 5), 1L));
-      testHarness.processElement(new StreamRecord<>(Row.of("head", 6), 1L));
+      testHarness.processElement(createRecord(1L, "tail", 5));
+      testHarness.processElement(createRecord(1L, "head", 6));
 
       testHarness.snapshot(3L, 1L);
       Assert.assertEquals(8L, countDataFiles());
@@ -220,23 +222,15 @@ public class TestFlinkSinkFunction {
       Assert.assertEquals(3L, GlobalTableCommitter.getMaxCommittedCheckpointId(tableLocation, new Configuration()));
 
       // Full scan the local table.
-      checkTableRecords(Lists.newArrayList(
+      TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
           RECORD.copy(ImmutableMap.of("word", "hello", "count", 1)),
           RECORD.copy(ImmutableMap.of("word", "world", "count", 2)),
           RECORD.copy(ImmutableMap.of("word", "foo", "count", 3)),
           RECORD.copy(ImmutableMap.of("word", "bar", "count", 4)),
           RECORD.copy(ImmutableMap.of("word", "tail", "count", 5)),
           RECORD.copy(ImmutableMap.of("word", "head", "count", 6))
-      ));
+      ), RECORD_CMP);
     }
-  }
-
-  private void checkTableRecords(List<Record> expected) {
-    Table newTable = new HadoopTables().load(tableLocation);
-    List<Record> results = Lists.newArrayList(IcebergGenerics.read(newTable).build());
-    expected.sort(RECORD_CMP);
-    results.sort(RECORD_CMP);
-    Assert.assertEquals("Should produce the expected record", expected, results);
   }
 
   private static class TestGlobalAggregateManager implements GlobalAggregateManager {
