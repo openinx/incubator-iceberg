@@ -73,26 +73,35 @@ public class TestFlinkIcebergSink extends AbstractTestBase {
     return Integer.compare((Integer) r1.getField("count"), (Integer) r2.getField("count"));
   };
 
-  private Table createTestIcebergTable() {
-    PartitionSpec spec = PartitionSpec
-        .builderFor(SCHEMA)
-        .identity("word")
-        .build();
+  private Table createTestIcebergTable(boolean partition) {
     Tables table = new HadoopTables();
-    return table.create(SCHEMA, spec, tableLocation);
+    if (partition) {
+      PartitionSpec spec = PartitionSpec
+          .builderFor(SCHEMA)
+          .identity("word")
+          .build();
+      return table.create(SCHEMA, spec, tableLocation);
+    } else {
+      return table.create(SCHEMA, tableLocation);
+    }
   }
 
   @Test
-  public void testDataStreamParallelism() throws Exception {
-    testDataStream(1);
+  public void testDataStreamParallelismOne() throws Exception {
+    testDataStream(1, false);
   }
 
   @Test
   public void testDataStreamMultiParallelism() throws Exception {
-    testDataStream(3);
+    testDataStream(3, false);
   }
 
-  private void testDataStream(int parallelism) throws Exception {
+  @Test
+  public void testDataStreamMultiParallelismInUnpartitionedTable() throws Exception {
+    testDataStream(3, true);
+  }
+
+  private void testDataStream(int parallelism, boolean partitionTable) throws Exception {
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
     // Enable the checkpoint.
     env.enableCheckpointing(100);
@@ -113,7 +122,7 @@ public class TestFlinkIcebergSink extends AbstractTestBase {
 
     DataStream<Tuple2<Boolean, Row>> dataStream = env.addSource(new FiniteTestSource<>(rows), tupleTypeInfo);
 
-    Table table = createTestIcebergTable();
+    Table table = createTestIcebergTable(partitionTable);
     Assert.assertNotNull(table);
 
     // Output the data stream to stdout.

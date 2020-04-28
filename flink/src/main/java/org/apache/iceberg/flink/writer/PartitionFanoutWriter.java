@@ -36,9 +36,15 @@ import org.apache.iceberg.io.FileAppender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class DynamicPartitionWriter<T> implements PartitionedWriter<T> {
+/**
+ * The PartitionFanoutWriter will open a writing data file for each partition and route the given record to the
+ * corresponding data file in the correct partition.
+ *
+ * @param <T> defines the data type of record to write.
+ */
+public class PartitionFanoutWriter<T> implements TaskWriter<T> {
 
-  private static final Logger LOG = LoggerFactory.getLogger(DynamicPartitionWriter.class);
+  private static final Logger LOG = LoggerFactory.getLogger(PartitionFanoutWriter.class);
 
   private final PartitionSpec spec;
   private final FileAppenderFactory<T> factory;
@@ -49,12 +55,12 @@ public class DynamicPartitionWriter<T> implements PartitionedWriter<T> {
   private final FileFormat fileFormat;
   private final List<DataFile> completeDataFiles;
 
-  public DynamicPartitionWriter(PartitionSpec spec,
-                                FileAppenderFactory<T> factory,
-                                Function<PartitionKey, EncryptedOutputFile> outputFileGetter,
-                                Function<T, PartitionKey> keyGetter,
-                                long targetFileSize,
-                                FileFormat fileFormat) {
+  public PartitionFanoutWriter(PartitionSpec spec,
+                               FileAppenderFactory<T> factory,
+                               Function<PartitionKey, EncryptedOutputFile> outputFileGetter,
+                               Function<T, PartitionKey> keyGetter,
+                               long targetFileSize,
+                               FileFormat fileFormat) {
     this.spec = spec;
     this.factory = factory;
     this.outputFileGetter = outputFileGetter;

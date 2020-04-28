@@ -78,7 +78,7 @@ public class PartitionKey implements StructLike {
     private final Transform[] transforms;
 
     @SuppressWarnings("unchecked")
-    Builder(PartitionSpec spec) {
+    public Builder(PartitionSpec spec) {
       List<PartitionField> fields = spec.fields();
       this.size = fields.size();
       this.transforms = new Transform[size];

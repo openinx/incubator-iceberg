@@ -23,7 +23,13 @@ import java.io.IOException;
 import java.util.List;
 import org.apache.iceberg.DataFile;
 
-public interface PartitionedWriter<T> {
+/**
+ * For an Flink Streaming/Batch sink, it will have many tasks to write the records into data files. The TaskWriter is
+ * used to write records for a given task. It's possible to write many data files at the same time.
+ *
+ * @param <T> define the data type of the record to write.
+ */
+public interface TaskWriter<T> {
 
   void write(T record) throws IOException;
 

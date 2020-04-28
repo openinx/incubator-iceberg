@@ -25,8 +25,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
-import java.util.UUID;
-import java.util.function.Function;
 import org.apache.commons.compress.utils.Lists;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.ListState;
@@ -51,13 +49,12 @@ import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.MetricsConfig;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.Tables;
-import org.apache.iceberg.avro.Avro;
-import org.apache.iceberg.encryption.EncryptedOutputFile;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.flink.data.FlinkParquetWriters;
-import org.apache.iceberg.flink.writer.DynamicPartitionWriter;
 import org.apache.iceberg.flink.writer.FileAppenderFactory;
-import org.apache.iceberg.flink.writer.PartitionedWriter;
+import org.apache.iceberg.flink.writer.OutputFileFactory;
+import org.apache.iceberg.flink.writer.TaskWriter;
+import org.apache.iceberg.flink.writer.TaskWriterFactory;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.hadoop.SerializableConfiguration;
 import org.apache.iceberg.io.FileAppender;
@@ -83,13 +80,9 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
   private final RowTypeInfo schema;
 
   private transient Table table;
-  private transient FileFormat fileFormat;
   private transient GlobalTableCommitter globalCommitter;
 
-  // TODO should make it to be a persisted state in flink state backend ???
-  private transient int fileCount;
-
-  private transient PartitionedWriter<Row> writer;
+  private transient TaskWriter<Row> writer;
 
   // ---- Sink state related fields. ----
   // State descriptors used to identify the listState.
@@ -125,11 +118,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
   public IcebergSinkFunction(String tableLocation, RowTypeInfo schema, Configuration conf) {
     this.tableLocation = tableLocation;
     this.schema = schema;
-    if (conf == null) {
-      this.hadoopConf = new SerializableConfiguration(new Configuration());
-    } else {
-      this.hadoopConf = new SerializableConfiguration(conf);
-    }
+    this.hadoopConf = new SerializableConfiguration(conf == null ? new Configuration() : conf);
   }
 
   /**
@@ -140,15 +129,12 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
    */
   @Override
   public void initializeState(FunctionInitializationContext context) throws Exception {
-    this.fileCount = 0;
-
     // TODO Let the hadoop tables can run on hadoop distributed file system.
     // Initialize the hadoop table and scheam etc.
     Tables tables = new HadoopTables(hadoopConf.get());
     this.table = tables.load(tableLocation);
     // Validate the FLINK schema.
     FlinkSchemaUtil.convert(schema);
-    this.fileFormat = getFileFormat();
 
     // Initialize the global table committer
     this.globalCommitter = new GlobalTableCommitter(
@@ -157,14 +143,14 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
         hadoopConf
     );
 
-    // Initialize the PartitionWriter instance.
+    // Initialize the task writer.
+    FileFormat fileFormat = getFileFormat();
     FileAppenderFactory<Row> appenderFactory = new FlinkFileAppenderFactory();
-    Function<PartitionKey, EncryptedOutputFile> outputFileGetter = this::createEncryptedOutputFile;
-    PartitionKey.Builder builder = new PartitionKey.Builder(table.spec());
-    this.writer = new DynamicPartitionWriter<>(table.spec(),
+    OutputFileFactory outputFileFactory = new OutputFileFactory(table,
+        fileFormat, getRuntimeContext().getIndexOfThisSubtask());
+    this.writer = TaskWriterFactory.createTaskWriter(table.spec(),
         appenderFactory,
-        outputFileGetter,
-        builder::build,
+        outputFileFactory,
         getTargetFileSizeBytes(),
         fileFormat);
 
@@ -241,31 +227,8 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
 
   @Override
   public void close() throws Exception {
-    this.writer.close();
-    this.writer = null;
-  }
-
-  private String generateFilename() {
-    String uuid = UUID.randomUUID().toString();
-    int hashCode = Math.abs(this.hashCode() % 10 ^ 5);
-    int taskId = 0;
-    try {
-      taskId = this.getRuntimeContext().getIndexOfThisSubtask();
-    } catch (IllegalStateException e) {
-      // For testing TestIcebergSinkFunction purpose, need to remove this catch in future.
-    }
-    return fileFormat.addExtension(String.format("%05d-%d-%s-%05d", hashCode, taskId, uuid, fileCount++));
-  }
-
-  private EncryptedOutputFile createEncryptedOutputFile(PartitionKey partitionKey) {
-    // TODO handle the partition and unpartitioned case.
-    assert table.specs().size() > 0 : "Don't support unpartitioned table now, it's a TODO issue";
-
-    String dataLocation = table
-        .locationProvider()
-        .newDataLocation(table.spec(), partitionKey, generateFilename());
-    OutputFile outputFile = table.io().newOutputFile(dataLocation);
-    return table.encryption().encrypt(outputFile);
+    writer.close();
+    writer = null;
   }
 
   private FileFormat getFileFormat() {
@@ -296,14 +259,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
                 .build();
 
           case AVRO:
-            return Avro.write(outputFile)
-                // TODO implement this write function.
-                .createWriterFunc(ignored -> null)
-                .setAll(table.properties())
-                .schema(table.schema())
-                .overwrite()
-                .build();
-
+            // TODO support to write AVRO file format.
           default:
             throw new UnsupportedOperationException("Cannot write unknown format: " + format);
         }
