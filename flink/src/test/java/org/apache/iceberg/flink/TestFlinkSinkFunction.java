@@ -86,6 +86,7 @@ public class TestFlinkSinkFunction {
 
   private String tableLocation = null;
   private Table table;
+  private final Configuration conf = new Configuration();
 
   @Before
   public void before() throws IOException {
@@ -114,7 +115,7 @@ public class TestFlinkSinkFunction {
   }
 
   private OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> createStreamSink() throws Exception {
-    IcebergSinkFunction sink = new IcebergSinkFunction(tableLocation, FLINK_SCHEMA);
+    IcebergSinkFunction sink = new IcebergSinkFunction(tableLocation, FLINK_SCHEMA, conf);
     OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> testHarness =
         new OneInputStreamOperatorTestHarness<>(new StreamSink<>(sink), 1, 1, 0);
     MockEnvironment env = testHarness.getEnvironment();

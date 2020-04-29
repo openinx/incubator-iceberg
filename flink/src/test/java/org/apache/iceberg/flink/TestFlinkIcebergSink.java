@@ -34,6 +34,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.util.FiniteTestSource;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
@@ -53,6 +54,7 @@ public class TestFlinkIcebergSink extends AbstractTestBase {
   @Rule
   public TemporaryFolder tempFolder = new TemporaryFolder();
   private String tableLocation;
+  private final Configuration conf = new Configuration();
 
   @Before
   public void before() throws IOException {
@@ -126,7 +128,7 @@ public class TestFlinkIcebergSink extends AbstractTestBase {
     Assert.assertNotNull(table);
 
     // Output the data stream to stdout.
-    dataStream.addSink(new IcebergSinkFunction(tableLocation, flinkSchema));
+    dataStream.addSink(new IcebergSinkFunction(tableLocation, conf));
 
     // Execute the program.
     env.execute("Test Iceberg DataStream");
