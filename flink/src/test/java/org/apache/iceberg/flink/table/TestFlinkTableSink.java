@@ -25,9 +25,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
-import org.apache.flink.api.common.typeinfo.Types;
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -36,12 +33,10 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.java.StreamTableEnvironment;
 import org.apache.flink.table.descriptors.Schema;
 import org.apache.flink.test.util.AbstractTestBase;
-import org.apache.iceberg.PartitionSpec;
+import org.apache.flink.types.Row;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.flink.TestUtility;
 import org.apache.iceberg.flink.WordCountData;
-import org.apache.iceberg.hadoop.HadoopTables;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -68,15 +63,7 @@ public class TestFlinkTableSink extends AbstractTestBase {
   public void before() throws IOException {
     File folder = tempFolder.newFolder();
     tableLocation = folder.getAbsolutePath();
-    Assert.assertNotNull(createTestIcebergTable());
-  }
-
-  private org.apache.iceberg.Table createTestIcebergTable() {
-    PartitionSpec spec = PartitionSpec
-        .builderFor(WordCountData.SCHEMA)
-        .identity("word")
-        .build();
-    return new HadoopTables().create(WordCountData.SCHEMA, spec, tableLocation);
+    WordCountData.createTable(tableLocation, true);
   }
 
   private void testSQL(int parallelism, boolean useDDL) throws Exception {
@@ -97,12 +84,11 @@ public class TestFlinkTableSink extends AbstractTestBase {
     }
 
     String[] worlds = new String[]{"hello", "world", "foo", "bar", "apache", "foundation"};
-    List<Tuple2<String, Integer>> tuple2s = Lists.newArrayList();
+    List<Row> rows = Lists.newArrayList();
     for (int i = 0; i < worlds.length; i++) {
-      tuple2s.add(Tuple2.of(worlds[i], i + 1));
+      rows.add(Row.of(worlds[i], i + 1));
     }
-    TupleTypeInfo<Tuple2<String, Integer>> tupleTypeInfo = new TupleTypeInfo<>(Types.STRING, Types.INT);
-    DataStream<Tuple2<String, Integer>> dataStream = env.addSource(new FiniteTestSource<>(tuple2s), tupleTypeInfo);
+    DataStream<Row> dataStream = env.addSource(new FiniteTestSource<>(rows), WordCountData.FLINK_SCHEMA.toRowType());
 
     tEnv.createTemporaryView("words", tEnv.fromDataStream(dataStream, "word,num"));
 

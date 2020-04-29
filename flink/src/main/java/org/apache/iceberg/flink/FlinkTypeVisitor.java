@@ -19,70 +19,61 @@
 
 package org.apache.iceberg.flink;
 
-import com.google.common.collect.Lists;
-import java.util.List;
-import org.apache.flink.api.common.typeinfo.BasicArrayTypeInfo;
-import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.java.typeutils.MapTypeInfo;
-import org.apache.flink.api.java.typeutils.ObjectArrayTypeInfo;
-import org.apache.flink.api.java.typeutils.RowTypeInfo;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.table.types.AtomicDataType;
+import org.apache.flink.table.types.CollectionDataType;
+import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.FieldsDataType;
+import org.apache.flink.table.types.KeyValueDataType;
+import org.apache.flink.table.types.logical.RowType;
 
 public class FlinkTypeVisitor<T> {
 
-  static <T> T visit(TypeInformation<?> type, FlinkTypeVisitor<T> visitor) {
-    if (type instanceof RowTypeInfo) {
-      RowTypeInfo rowTypeInfo = (RowTypeInfo) type;
-      TypeInformation<?>[] types = rowTypeInfo.getFieldTypes();
-
-      List<T> fieldResults = Lists.newArrayListWithExpectedSize(types.length);
-      for (int i = 0; i < types.length; i++) {
-        fieldResults.add(visit(types[i], visitor));
+  static <T> T visit(DataType dataType, FlinkTypeVisitor<T> visitor) {
+    if (dataType instanceof FieldsDataType) {
+      FieldsDataType fieldsType = (FieldsDataType) dataType;
+      Map<String, DataType> fields = fieldsType.getFieldDataTypes();
+      Map<String, Tuple2<String, T>> fieldResults = new LinkedHashMap<>();
+      // Make sure that we're traversing the fields in the same order as constructing the schema's fields.
+      RowType rowType = (RowType) dataType.getLogicalType();
+      for (int i = 0; i < fields.size(); i++) {
+        String name = rowType.getFieldNames().get(i);
+        String comment = rowType.getFields().get(i).getDescription().orElse(null);
+        fieldResults.put(name, Tuple2.of(comment, visit(fields.get(name), visitor)));
       }
-      return visitor.row(rowTypeInfo, fieldResults);
-    } else if (type instanceof BasicArrayTypeInfo) {
-      BasicArrayTypeInfo basicArrayTypeInfo = (BasicArrayTypeInfo) type;
-      return visitor.basicArray(basicArrayTypeInfo,
-          visit(basicArrayTypeInfo.getComponentInfo(), visitor));
-    } else if (type instanceof ObjectArrayTypeInfo) {
-      ObjectArrayTypeInfo objectArrayTypeInfo = (ObjectArrayTypeInfo) type;
-      return visitor.objectArray(objectArrayTypeInfo,
-          visit(objectArrayTypeInfo.getComponentInfo(), visitor));
-    } else if (type instanceof PrimitiveArrayTypeInfo) {
-      PrimitiveArrayTypeInfo primitiveArrayTypeInfo = (PrimitiveArrayTypeInfo) type;
-      return visitor.primitiveArray(primitiveArrayTypeInfo,
-          visit(primitiveArrayTypeInfo.getComponentType(), visitor));
-    } else if (type instanceof MapTypeInfo) {
-      MapTypeInfo mapTypeInfo = (MapTypeInfo) type;
-      return visitor.map(mapTypeInfo,
-          visit(mapTypeInfo.getKeyTypeInfo(), visitor),
-          visit(mapTypeInfo.getValueTypeInfo(), visitor));
+      return visitor.fields(fieldsType, fieldResults);
+    } else if (dataType instanceof CollectionDataType) {
+      CollectionDataType collectionType = (CollectionDataType) dataType;
+      return visitor.collection(collectionType,
+          visit(collectionType.getElementDataType(), visitor));
+    } else if (dataType instanceof KeyValueDataType) {
+      KeyValueDataType mapType = (KeyValueDataType) dataType;
+      return visitor.map(mapType,
+          visit(mapType.getKeyDataType(), visitor),
+          visit(mapType.getValueDataType(), visitor));
+    } else if (dataType instanceof AtomicDataType) {
+      AtomicDataType atomic = (AtomicDataType) dataType;
+      return visitor.atomic(atomic);
     } else {
-      return visitor.primitive(type);
+      throw new UnsupportedOperationException("Unsupported data type: " + dataType);
     }
   }
 
-  public T row(RowTypeInfo type, List<T> fieldResults) {
+  public T fields(FieldsDataType dataType, Map<String, Tuple2<String, T>> fieldResults) {
     return null;
   }
 
-  public T basicArray(BasicArrayTypeInfo type, T elementResult) {
+  public T collection(CollectionDataType type, T elementResult) {
     return null;
   }
 
-  public T objectArray(ObjectArrayTypeInfo type, T elementResult) {
+  public T map(KeyValueDataType type, T keyResult, T valueResult) {
     return null;
   }
 
-  public T primitiveArray(PrimitiveArrayTypeInfo type, T elementResult) {
-    return null;
-  }
-
-  public T map(MapTypeInfo type, T keyResult, T valueResult) {
-    return null;
-  }
-
-  public T primitive(TypeInformation type) {
+  public T atomic(AtomicDataType type) {
     return null;
   }
 }

@@ -62,6 +62,7 @@ import org.apache.iceberg.hadoop.SerializableConfiguration;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
+import org.apache.iceberg.types.TypeUtil;
 import org.apache.iceberg.util.PropertyUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,7 +80,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
 
   private final String tableLocation;
   private final SerializableConfiguration hadoopConf;
-  private final Schema schema;
+  private Schema readSchema;
 
   private transient Table table;
   private transient GlobalTableCommitter globalCommitter;
@@ -100,13 +101,13 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
    * non-serializable inner members to be null.
    *
    * @param tableLocation What's the base path of the iceberg table.
-   * @param schema        The schema of source data which will be flowed to iceberg table.
+   * @param readSchema    The schema of source data which will be flowed to iceberg table.
    * @param conf          The hadoop's configuration.
    */
-  private IcebergSinkFunction(String tableLocation, Schema schema, Configuration conf) {
+  private IcebergSinkFunction(String tableLocation, Schema readSchema, Configuration conf) {
     this.tableLocation = tableLocation;
     this.hadoopConf = new SerializableConfiguration(conf == null ? new Configuration() : conf);
-    this.schema = schema;
+    this.readSchema = readSchema;
   }
 
   @Override
@@ -114,8 +115,10 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
     // Load the iceberg table if exist, otherwise just create a new one.
     Tables tables = new HadoopTables(hadoopConf.get());
     this.table = tables.load(tableLocation);
-    if (this.schema != null) {
-      FlinkSchemaUtil.validate(schema, table.schema(), false, false);
+    if (this.readSchema != null) {
+      // reassign ids to match the existing table schema
+      readSchema = TypeUtil.reassignIds(readSchema, table.schema());
+      FlinkSchemaUtil.validate(readSchema, table.schema(), true, true);
     }
 
     // Initialize the global table committer
@@ -279,7 +282,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
 
     public IcebergSinkFunction build() {
       Preconditions.checkArgument(tableLocation != null, "Iceberg table location should't be null");
-      Schema schema = FlinkSchemaUtil.convert(tableSchema);
+      Schema schema = tableSchema == null ? null : FlinkSchemaUtil.convert(tableSchema);
       return new IcebergSinkFunction(tableLocation, schema, conf);
     }
   }

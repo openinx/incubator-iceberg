@@ -41,9 +41,6 @@ import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.iceberg.PartitionSpec;
-import org.apache.iceberg.Table;
-import org.apache.iceberg.hadoop.HadoopTables;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -63,15 +60,7 @@ public class TestFlinkSinkFunction {
   public void before() throws IOException {
     File folder = tempFolder.newFolder();
     tableLocation = folder.getAbsolutePath();
-    createTestIcebergTable();
-  }
-
-  private Table createTestIcebergTable() {
-    PartitionSpec spec = PartitionSpec
-        .builderFor(WordCountData.SCHEMA)
-        .identity("word")
-        .build();
-    return new HadoopTables().create(WordCountData.SCHEMA, spec, tableLocation);
+    WordCountData.createTable(tableLocation, true);
   }
 
   private static void setFinalFieldWithValue(Field field, Object obj, Object newValue) throws Exception {
@@ -143,10 +132,10 @@ public class TestFlinkSinkFunction {
       // Full scan the local table.
 
       TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "hello", "count", 1)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "world", "count", 2)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "foo", "count", 3)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "bar", "count", 4))
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "hello", "num", 1)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "world", "num", 2)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "foo", "num", 3)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "bar", "num", 4))
       ), WordCountData.RECORD_COMPARATOR);
     }
   }
@@ -177,10 +166,10 @@ public class TestFlinkSinkFunction {
 
       // Full scan the local table.
       TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "hello", "count", 1)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "world", "count", 2)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "foo", "count", 3)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "bar", "count", 4))
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "hello", "num", 1)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "world", "num", 2)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "foo", "num", 3)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "bar", "num", 4))
       ), WordCountData.RECORD_COMPARATOR);
     }
     try (OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> testHarness = createStreamSink()) {
@@ -198,12 +187,12 @@ public class TestFlinkSinkFunction {
 
       // Full scan the local table.
       TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "hello", "count", 1)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "world", "count", 2)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "foo", "count", 3)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "bar", "count", 4)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "tail", "count", 5)),
-          WordCountData.RECORD.copy(ImmutableMap.of("word", "head", "count", 6))
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "hello", "num", 1)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "world", "num", 2)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "foo", "num", 3)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "bar", "num", 4)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "tail", "num", 5)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "head", "num", 6))
       ), WordCountData.RECORD_COMPARATOR);
     }
   }

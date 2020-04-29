@@ -20,8 +20,8 @@
 package org.apache.iceberg.flink;
 
 import java.util.List;
-import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.types.FieldsDataType;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.types.CheckCompatibility;
 import org.apache.iceberg.types.Type;
@@ -32,22 +32,24 @@ public class FlinkSchemaUtil {
   }
 
   public static Schema convert(TableSchema flinkSchema) {
-    RowTypeInfo rowTypeInfo = new RowTypeInfo(flinkSchema.getFieldTypes(), flinkSchema.getFieldNames());
-    Type converted = FlinkTypeVisitor.visit(rowTypeInfo, new FlinkTypeToType(rowTypeInfo));
+    FieldsDataType root = (FieldsDataType) flinkSchema.toRowDataType();
+    Type converted = FlinkTypeVisitor.visit(root, new FlinkTypeToType(root));
     return new Schema(converted.asNestedType().asStructType().fields());
   }
 
-  static void validate(Schema sinkSchema, Schema sourceSchema, boolean checkNullability, boolean checkOrdering) {
+  static void validate(Schema readSchema, Schema writeSchema, boolean checkNullability, boolean checkOrdering) {
     List<String> errors;
     if (checkNullability) {
-      errors = CheckCompatibility.writeCompatibilityErrors(sinkSchema, sourceSchema, checkOrdering);
+      errors = CheckCompatibility.writeCompatibilityErrors(readSchema, writeSchema, checkOrdering);
     } else {
-      errors = CheckCompatibility.typeCompatibilityErrors(sinkSchema, sourceSchema, checkOrdering);
+      errors = CheckCompatibility.typeCompatibilityErrors(readSchema, writeSchema, checkOrdering);
     }
     if (!errors.isEmpty()) {
       StringBuilder sb = new StringBuilder();
       sb.append("Cannot write incompatible dataset to table with schema:\n")
-          .append(sinkSchema)
+          .append(writeSchema)
+          .append("\nRead Schema:\n")
+          .append(readSchema)
           .append("\nProblems:");
       for (String error : errors) {
         sb.append("\n* ").append(error);
