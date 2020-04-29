@@ -54,7 +54,11 @@ public class IcebergTableSink implements UpsertStreamTableSink<Row> {
   @Override
   public DataStreamSink<?> consumeDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
     Configuration conf = new Configuration();
-    IcebergSinkFunction sinkFunction = new IcebergSinkFunction(tableIdentifier, tableSchema, conf);
+    IcebergSinkFunction sinkFunction = IcebergSinkFunction.builder()
+        .withConfiguration(conf)
+        .withTableLocation(tableIdentifier)
+        .withTableSchema(tableSchema)
+        .build();
     return dataStream
         .addSink(sinkFunction)
         .setParallelism(dataStream.getParallelism())

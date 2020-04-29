@@ -19,10 +19,8 @@
 
 package org.apache.iceberg.flink;
 
-import java.util.ArrayList;
-import java.util.List;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.java.typeutils.RowTypeInfo;
+import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.TableSchema;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.types.Types;
 import org.junit.Assert;
@@ -32,42 +30,33 @@ public class TestFlinkSchemaUtil {
 
   @Test
   public void testConvertFlinkSchemaToIcebergSchema() {
-    List<TypeInformation<?>> types = new ArrayList<>();
-    types.add(org.apache.flink.api.common.typeinfo.Types.INT);
-    types.add(org.apache.flink.api.common.typeinfo.Types.STRING);
-    types.add(org.apache.flink.api.common.typeinfo.Types.DOUBLE);
-    types.add(org.apache.flink.api.common.typeinfo.Types.MAP(
-        org.apache.flink.api.common.typeinfo.Types.STRING,
-        org.apache.flink.api.common.typeinfo.Types.ROW(
-            org.apache.flink.api.common.typeinfo.Types.DOUBLE,
-            org.apache.flink.api.common.typeinfo.Types.DOUBLE
-        )
-    ));
-    types.add(org.apache.flink.api.common.typeinfo.Types.OBJECT_ARRAY(
-        org.apache.flink.api.common.typeinfo.Types.STRING
-    ));
-    types.add(org.apache.flink.api.common.typeinfo.Types.PRIMITIVE_ARRAY(
-        org.apache.flink.api.common.typeinfo.Types.INT
-    ));
+    TableSchema flinkSchema = TableSchema.builder()
+        .field("id", DataTypes.INT().notNull())
+        .field("name", DataTypes.STRING()) /* optional by default */
+        .field("salary", DataTypes.DOUBLE().notNull())
+        .field("locations", DataTypes.MAP(DataTypes.STRING(),
+            DataTypes.ROW(DataTypes.FIELD("posX", DataTypes.DOUBLE().notNull(), "X field"),
+                DataTypes.FIELD("posY", DataTypes.DOUBLE().notNull(), "Y field"))))
+        .field("strArray", DataTypes.ARRAY(DataTypes.STRING()).nullable())
+        .field("intArray", DataTypes.ARRAY(DataTypes.INT()).nullable())
+        .build();
 
-    String[] fieldNames = new String[]{
-        "id", "name", "salary", "locations", "groupIds", "intArray"
-    };
-    RowTypeInfo flinkSchema = new RowTypeInfo(types.toArray(new TypeInformation[0]), fieldNames);
     Schema actualSchema = FlinkSchemaUtil.convert(flinkSchema);
     Schema expectedSchema = new Schema(
-        Types.NestedField.optional(0, "id", Types.IntegerType.get(), null),
+        Types.NestedField.required(0, "id", Types.IntegerType.get(), null),
         Types.NestedField.optional(1, "name", Types.StringType.get(), null),
-        Types.NestedField.optional(2, "salary", Types.DoubleType.get(), null),
+        Types.NestedField.required(2, "salary", Types.DoubleType.get(), null),
         Types.NestedField.optional(3, "locations", Types.MapType.ofOptional(8, 9,
             Types.StringType.get(),
             Types.StructType.of(
-                Types.NestedField.optional(6, "f0", Types.DoubleType.get(), null),
-                Types.NestedField.optional(7, "f1", Types.DoubleType.get(), null)
+                Types.NestedField.required(6, "posX", Types.DoubleType.get(), "X field"),
+                Types.NestedField.required(7, "posY", Types.DoubleType.get(), "Y field")
             ))),
-        Types.NestedField.optional(4, "groupIds", Types.ListType.ofOptional(10, Types.StringType.get())),
+        Types.NestedField.optional(4, "strArray", Types.ListType.ofOptional(10, Types.StringType.get())),
         Types.NestedField.optional(5, "intArray", Types.ListType.ofOptional(11, Types.IntegerType.get()))
     );
+
     Assert.assertEquals(expectedSchema.toString(), actualSchema.toString());
+    FlinkSchemaUtil.validate(expectedSchema, actualSchema, false, false);
   }
 }

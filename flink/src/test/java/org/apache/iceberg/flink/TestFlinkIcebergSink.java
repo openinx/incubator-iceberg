@@ -27,8 +27,6 @@ import java.util.Comparator;
 import java.util.List;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.RowTypeInfo;
-import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.util.FiniteTestSource;
@@ -109,26 +107,24 @@ public class TestFlinkIcebergSink extends AbstractTestBase {
     env.enableCheckpointing(100);
     env.setParallelism(parallelism);
 
-    RowTypeInfo flinkSchema = new RowTypeInfo(
-        org.apache.flink.api.common.typeinfo.Types.STRING,
-        org.apache.flink.api.common.typeinfo.Types.INT
-    );
-    TupleTypeInfo<Tuple2<Boolean, Row>> tupleTypeInfo = new TupleTypeInfo<>(
-        org.apache.flink.api.common.typeinfo.Types.BOOLEAN, flinkSchema);
-
-    List<Tuple2<Boolean, Row>> rows = Lists.newArrayList(
-        Tuple2.of(true, Row.of("hello", 2)),
-        Tuple2.of(true, Row.of("world", 2)),
-        Tuple2.of(true, Row.of("word", 1))
+    List<Tuple2<String, Integer>> rows = Lists.newArrayList(
+        Tuple2.of("hello", 2),
+        Tuple2.of("world", 2),
+        Tuple2.of("word", 1)
     );
 
-    DataStream<Tuple2<Boolean, Row>> dataStream = env.addSource(new FiniteTestSource<>(rows), tupleTypeInfo);
+    DataStream<Tuple2<String, Integer>> dataStream = env.addSource(new FiniteTestSource<>(rows));
 
     Table table = createTestIcebergTable(partitionTable);
     Assert.assertNotNull(table);
 
     // Output the data stream to stdout.
-    dataStream.addSink(new IcebergSinkFunction(tableLocation, conf));
+    dataStream.map(tuple2 -> Tuple2.of(true, Row.of(tuple2.f0, tuple2.f1)))
+        .addSink(IcebergSinkFunction
+            .builder()
+            .withTableLocation(tableLocation)
+            .withConfiguration(conf)
+            .build());
 
     // Execute the program.
     env.execute("Test Iceberg DataStream");
@@ -138,9 +134,8 @@ public class TestFlinkIcebergSink extends AbstractTestBase {
     Record record = GenericRecord.create(SCHEMA);
     List<Record> records = Lists.newArrayList();
     for (int i = 0; i < 2; i++) {
-      for (Tuple2<Boolean, Row> tuple2 : rows) {
-        records.add(record.copy(ImmutableMap.of("word", tuple2.f1.getField(0),
-            "count", tuple2.f1.getField(1))));
+      for (Tuple2 row : rows) {
+        records.add(record.copy(ImmutableMap.of("word", row.f0, "count", row.f1)));
       }
     }
     TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(records), RECORD_CMP);

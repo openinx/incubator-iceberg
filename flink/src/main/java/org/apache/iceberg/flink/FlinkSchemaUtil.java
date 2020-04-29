@@ -19,9 +19,11 @@
 
 package org.apache.iceberg.flink;
 
+import java.util.List;
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.types.CheckCompatibility;
 import org.apache.iceberg.types.Type;
 
 public class FlinkSchemaUtil {
@@ -29,12 +31,28 @@ public class FlinkSchemaUtil {
   private FlinkSchemaUtil() {
   }
 
-  public static Schema convert(RowTypeInfo flinkSchema) {
-    Type converted = FlinkTypeVisitor.visit(flinkSchema, new FlinkTypeToType(flinkSchema));
+  public static Schema convert(TableSchema flinkSchema) {
+    RowTypeInfo rowTypeInfo = new RowTypeInfo(flinkSchema.getFieldTypes(), flinkSchema.getFieldNames());
+    Type converted = FlinkTypeVisitor.visit(rowTypeInfo, new FlinkTypeToType(rowTypeInfo));
     return new Schema(converted.asNestedType().asStructType().fields());
   }
 
-  public static void validate(TableSchema flinkSchema, Schema icebergSchema) {
-
+  static void validate(Schema sinkSchema, Schema sourceSchema, boolean checkNullability, boolean checkOrdering) {
+    List<String> errors;
+    if (checkNullability) {
+      errors = CheckCompatibility.writeCompatibilityErrors(sinkSchema, sourceSchema, checkOrdering);
+    } else {
+      errors = CheckCompatibility.typeCompatibilityErrors(sinkSchema, sourceSchema, checkOrdering);
+    }
+    if (!errors.isEmpty()) {
+      StringBuilder sb = new StringBuilder();
+      sb.append("Cannot write incompatible dataset to table with schema:\n")
+          .append(sinkSchema)
+          .append("\nProblems:");
+      for (String error : errors) {
+        sb.append("\n* ").append(error);
+      }
+      throw new IllegalArgumentException(sb.toString());
+    }
   }
 }
