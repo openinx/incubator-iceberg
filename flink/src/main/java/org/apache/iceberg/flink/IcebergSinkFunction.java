@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.flink;
 
+import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
@@ -32,7 +33,6 @@ import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.api.java.ClosureCleaner;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.core.io.SimpleVersionedSerialization;
 import org.apache.flink.runtime.state.CheckpointListener;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
@@ -42,11 +42,13 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
+import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.MetricsConfig;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.Tables;
 import org.apache.iceberg.exceptions.RuntimeIOException;
@@ -60,6 +62,7 @@ import org.apache.iceberg.hadoop.SerializableConfiguration;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
+import org.apache.iceberg.types.TypeUtil;
 import org.apache.iceberg.util.PropertyUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,7 +80,7 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
 
   private final String tableLocation;
   private final SerializableConfiguration hadoopConf;
-  private final RowTypeInfo schema;
+  private Schema readSchema;
 
   private transient Table table;
   private transient GlobalTableCommitter globalCommitter;
@@ -93,48 +96,30 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
   private transient NavigableMap<Long, List<DataFile>> completeFilesPerCheckpoint;
 
   /**
-   * TODO Need to validate the Flink schema and iceberg schema.
-   * NOTICE don't do any initialization work in this constructor, because in {@link DataStream#addSink(SinkFunction)}
+   * Be careful to do any initialization in this constructor, because in {@link DataStream#addSink(SinkFunction)}
    * it will call {@link ClosureCleaner#clean(Object, ExecutionConfig.ClosureCleanerLevel, boolean)} to set all the
    * non-serializable inner members to be null.
    *
    * @param tableLocation What's the base path of the iceberg table.
-   * @param schema        The defined Flink table schema. TODO Better to use the new FLINK API: TableSchema.
+   * @param readSchema    The schema of source data which will be flowed to iceberg table.
+   * @param conf          The hadoop's configuration.
    */
-  public IcebergSinkFunction(String tableLocation, RowTypeInfo schema) {
-    this(tableLocation, schema, new Configuration());
-  }
-
-  /**
-   * TODO Need to validate the Flink schema and iceberg schema.
-   * NOTICE don't do any initialization work in this constructor, because in {@link DataStream#addSink(SinkFunction)}
-   * it will call {@link ClosureCleaner#clean(Object, ExecutionConfig.ClosureCleanerLevel, boolean)} to set all the
-   * non-serializable inner members to be null.
-   *
-   * @param tableLocation What's the base path of the iceberg table.
-   * @param schema        The defined Flink table schema.
-   * @param conf          The distribute table configuration.
-   */
-  public IcebergSinkFunction(String tableLocation, RowTypeInfo schema, Configuration conf) {
+  private IcebergSinkFunction(String tableLocation, Schema readSchema, Configuration conf) {
     this.tableLocation = tableLocation;
-    this.schema = schema;
     this.hadoopConf = new SerializableConfiguration(conf == null ? new Configuration() : conf);
+    this.readSchema = readSchema;
   }
 
-  /**
-   * TODO need to handle the restart case which would remain many unfinished orphan data files ???
-   *
-   * @param context of the state.
-   * @throws Exception if any error happen.
-   */
   @Override
   public void initializeState(FunctionInitializationContext context) throws Exception {
-    // TODO Let the hadoop tables can run on hadoop distributed file system.
-    // Initialize the hadoop table and scheam etc.
+    // Load the iceberg table if exist, otherwise just create a new one.
     Tables tables = new HadoopTables(hadoopConf.get());
     this.table = tables.load(tableLocation);
-    // Validate the FLINK schema.
-    FlinkSchemaUtil.convert(schema);
+    if (this.readSchema != null) {
+      // reassign ids to match the existing table schema
+      readSchema = TypeUtil.reassignIds(readSchema, table.schema());
+      FlinkSchemaUtil.validate(readSchema, table.schema(), true, true);
+    }
 
     // Initialize the global table committer
     this.globalCommitter = new GlobalTableCommitter(
@@ -227,8 +212,10 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
 
   @Override
   public void close() throws Exception {
-    writer.close();
-    writer = null;
+    if (writer != null) {
+      writer.close();
+      writer = null;
+    }
   }
 
   private FileFormat getFileFormat() {
@@ -266,6 +253,37 @@ public class IcebergSinkFunction extends RichSinkFunction<Tuple2<Boolean, Row>>
       } catch (IOException e) {
         throw new RuntimeIOException(e);
       }
+    }
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static class Builder {
+    private String tableLocation;
+    private TableSchema tableSchema;
+    private Configuration conf = new Configuration();
+
+    public Builder withTableLocation(String newTableLocation) {
+      this.tableLocation = newTableLocation;
+      return this;
+    }
+
+    public Builder withTableSchema(TableSchema newTableSchema) {
+      this.tableSchema = newTableSchema;
+      return this;
+    }
+
+    public Builder withConfiguration(Configuration newConf) {
+      this.conf = newConf;
+      return this;
+    }
+
+    public IcebergSinkFunction build() {
+      Preconditions.checkArgument(tableLocation != null, "Iceberg table location should't be null");
+      Schema schema = tableSchema == null ? null : FlinkSchemaUtil.convert(tableSchema);
+      return new IcebergSinkFunction(tableLocation, schema, conf);
     }
   }
 }

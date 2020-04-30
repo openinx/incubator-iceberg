@@ -30,7 +30,6 @@ import org.apache.iceberg.hadoop.HadoopTables;
 import org.junit.Assert;
 
 public class TestUtility {
-
   private TestUtility() {
 
   }

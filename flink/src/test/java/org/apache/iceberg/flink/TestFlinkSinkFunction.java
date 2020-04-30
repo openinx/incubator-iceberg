@@ -28,14 +28,10 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.functions.AggregateFunction;
-import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.operators.testutils.MockEnvironment;
 import org.apache.flink.runtime.taskexecutor.GlobalAggregateManager;
@@ -45,12 +41,6 @@ import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.iceberg.PartitionSpec;
-import org.apache.iceberg.Schema;
-import org.apache.iceberg.Table;
-import org.apache.iceberg.data.GenericRecord;
-import org.apache.iceberg.data.Record;
-import org.apache.iceberg.hadoop.HadoopTables;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -60,47 +50,17 @@ import org.junit.rules.TemporaryFolder;
 // TODO make it work on both parquet and avro format.
 public class TestFlinkSinkFunction {
 
-  private static final Schema SCHEMA = new Schema(
-      org.apache.iceberg.types.Types.NestedField.optional(
-          1, "word",
-          org.apache.iceberg.types.Types.StringType.get()
-      ),
-      org.apache.iceberg.types.Types.NestedField.optional(
-          2, "count",
-          org.apache.iceberg.types.Types.IntegerType.get()
-      )
-  );
-
-  private static final RowTypeInfo FLINK_SCHEMA = (RowTypeInfo) Types.ROW(Types.STRING, Types.INT);
-  private static final Record RECORD = GenericRecord.create(SCHEMA);
-  private static final Comparator<Record> RECORD_CMP = (r1, r2) -> {
-    int ret = StringUtils.compare((String) r1.getField("word"), (String) r2.getField("word"));
-    if (ret != 0) {
-      return ret;
-    }
-    return Integer.compare((Integer) r1.getField("count"), (Integer) r2.getField("count"));
-  };
-
   @Rule
   public TemporaryFolder tempFolder = new TemporaryFolder();
 
   private String tableLocation = null;
-  private Table table;
+  private final Configuration conf = new Configuration();
 
   @Before
   public void before() throws IOException {
     File folder = tempFolder.newFolder();
     tableLocation = folder.getAbsolutePath();
-    table = createTestIcebergTable();
-    Assert.assertNotNull(table);
-  }
-
-  private Table createTestIcebergTable() {
-    PartitionSpec spec = PartitionSpec
-        .builderFor(SCHEMA)
-        .identity("word")
-        .build();
-    return new HadoopTables().create(SCHEMA, spec, tableLocation);
+    WordCountData.createTable(tableLocation, true);
   }
 
   private static void setFinalFieldWithValue(Field field, Object obj, Object newValue) throws Exception {
@@ -114,7 +74,11 @@ public class TestFlinkSinkFunction {
   }
 
   private OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> createStreamSink() throws Exception {
-    IcebergSinkFunction sink = new IcebergSinkFunction(tableLocation, FLINK_SCHEMA);
+    IcebergSinkFunction sink = IcebergSinkFunction.builder()
+        .withTableLocation(tableLocation)
+        .withConfiguration(conf)
+        .withTableSchema(WordCountData.FLINK_SCHEMA)
+        .build();
     OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> testHarness =
         new OneInputStreamOperatorTestHarness<>(new StreamSink<>(sink), 1, 1, 0);
     MockEnvironment env = testHarness.getEnvironment();
@@ -168,11 +132,11 @@ public class TestFlinkSinkFunction {
       // Full scan the local table.
 
       TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
-          RECORD.copy(ImmutableMap.of("word", "hello", "count", 1)),
-          RECORD.copy(ImmutableMap.of("word", "world", "count", 2)),
-          RECORD.copy(ImmutableMap.of("word", "foo", "count", 3)),
-          RECORD.copy(ImmutableMap.of("word", "bar", "count", 4))
-      ), RECORD_CMP);
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "hello", "num", 1)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "world", "num", 2)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "foo", "num", 3)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "bar", "num", 4))
+      ), WordCountData.RECORD_COMPARATOR);
     }
   }
 
@@ -202,11 +166,11 @@ public class TestFlinkSinkFunction {
 
       // Full scan the local table.
       TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
-          RECORD.copy(ImmutableMap.of("word", "hello", "count", 1)),
-          RECORD.copy(ImmutableMap.of("word", "world", "count", 2)),
-          RECORD.copy(ImmutableMap.of("word", "foo", "count", 3)),
-          RECORD.copy(ImmutableMap.of("word", "bar", "count", 4))
-      ), RECORD_CMP);
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "hello", "num", 1)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "world", "num", 2)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "foo", "num", 3)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "bar", "num", 4))
+      ), WordCountData.RECORD_COMPARATOR);
     }
     try (OneInputStreamOperatorTestHarness<Tuple2<Boolean, Row>, Object> testHarness = createStreamSink()) {
       testHarness.setup();
@@ -223,13 +187,13 @@ public class TestFlinkSinkFunction {
 
       // Full scan the local table.
       TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
-          RECORD.copy(ImmutableMap.of("word", "hello", "count", 1)),
-          RECORD.copy(ImmutableMap.of("word", "world", "count", 2)),
-          RECORD.copy(ImmutableMap.of("word", "foo", "count", 3)),
-          RECORD.copy(ImmutableMap.of("word", "bar", "count", 4)),
-          RECORD.copy(ImmutableMap.of("word", "tail", "count", 5)),
-          RECORD.copy(ImmutableMap.of("word", "head", "count", 6))
-      ), RECORD_CMP);
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "hello", "num", 1)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "world", "num", 2)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "foo", "num", 3)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "bar", "num", 4)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "tail", "num", 5)),
+          WordCountData.RECORD.copy(ImmutableMap.of("word", "head", "num", 6))
+      ), WordCountData.RECORD_COMPARATOR);
     }
   }
 

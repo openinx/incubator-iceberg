@@ -23,7 +23,6 @@ import java.util.Arrays;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.table.api.TableSchema;
@@ -32,6 +31,7 @@ import org.apache.flink.table.sinks.TableSink;
 import org.apache.flink.table.sinks.UpsertStreamTableSink;
 import org.apache.flink.table.utils.TableConnectorUtils;
 import org.apache.flink.types.Row;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.flink.IcebergSinkFunction;
 
 public class IcebergTableSink implements UpsertStreamTableSink<Row> {
@@ -53,8 +53,12 @@ public class IcebergTableSink implements UpsertStreamTableSink<Row> {
 
   @Override
   public DataStreamSink<?> consumeDataStream(DataStream<Tuple2<Boolean, Row>> dataStream) {
-    RowTypeInfo rowTypeInfo = new RowTypeInfo(tableSchema.getFieldTypes(), tableSchema.getFieldNames());
-    IcebergSinkFunction sinkFunction = new IcebergSinkFunction(tableIdentifier, rowTypeInfo);
+    Configuration conf = new Configuration();
+    IcebergSinkFunction sinkFunction = IcebergSinkFunction.builder()
+        .withConfiguration(conf)
+        .withTableLocation(tableIdentifier)
+        .withTableSchema(tableSchema)
+        .build();
     return dataStream
         .addSink(sinkFunction)
         .setParallelism(dataStream.getParallelism())

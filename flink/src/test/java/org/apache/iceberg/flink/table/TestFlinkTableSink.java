@@ -24,28 +24,19 @@ import com.google.common.collect.Lists;
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
-import org.apache.commons.lang3.StringUtils;
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.util.FiniteTestSource;
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.java.StreamTableEnvironment;
 import org.apache.flink.table.descriptors.Schema;
 import org.apache.flink.test.util.AbstractTestBase;
-import org.apache.iceberg.PartitionSpec;
-import org.apache.iceberg.data.GenericRecord;
+import org.apache.flink.types.Row;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.flink.TestUtility;
-import org.apache.iceberg.hadoop.HadoopTables;
-import org.apache.iceberg.types.Types;
-import org.junit.Assert;
+import org.apache.iceberg.flink.WordCountData;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -55,20 +46,6 @@ import org.junit.runners.Parameterized;
 
 @RunWith(Parameterized.class)
 public class TestFlinkTableSink extends AbstractTestBase {
-
-  private static final org.apache.iceberg.Schema SCHEMA = new org.apache.iceberg.Schema(
-      Types.NestedField.optional(1, "word", Types.StringType.get()),
-      Types.NestedField.optional(2, "num", Types.LongType.get())
-  );
-  private static final Record RECORD = GenericRecord.create(SCHEMA);
-
-  private static final Comparator<Record> RECORD_COMPARATOR = (r1, r2) -> {
-    int ret = StringUtils.compare((String) r1.getField("word"), (String) r2.getField("word"));
-    if (ret != 0) {
-      return ret;
-    }
-    return Long.compare((Long) r1.getField("num"), (Long) r2.getField("num"));
-  };
 
   @Rule
   public TemporaryFolder tempFolder = new TemporaryFolder();
@@ -86,15 +63,7 @@ public class TestFlinkTableSink extends AbstractTestBase {
   public void before() throws IOException {
     File folder = tempFolder.newFolder();
     tableLocation = folder.getAbsolutePath();
-    Assert.assertNotNull(createTestIcebergTable());
-  }
-
-  private org.apache.iceberg.Table createTestIcebergTable() {
-    PartitionSpec spec = PartitionSpec
-        .builderFor(SCHEMA)
-        .identity("word")
-        .build();
-    return new HadoopTables().create(SCHEMA, spec, tableLocation);
+    WordCountData.createTable(tableLocation, true);
   }
 
   private void testSQL(int parallelism, boolean useDDL) throws Exception {
@@ -115,14 +84,11 @@ public class TestFlinkTableSink extends AbstractTestBase {
     }
 
     String[] worlds = new String[]{"hello", "world", "foo", "bar", "apache", "foundation"};
-    List<Tuple2<String, Long>> tuple2s = Lists.newArrayList();
+    List<Row> rows = Lists.newArrayList();
     for (int i = 0; i < worlds.length; i++) {
-      tuple2s.add(Tuple2.of(worlds[i], i + 1L));
+      rows.add(Row.of(worlds[i], i + 1));
     }
-    TupleTypeInfo<Tuple2<String, Long>> tupleTypeInfo = new TupleTypeInfo<>(
-        org.apache.flink.api.common.typeinfo.Types.STRING,
-        org.apache.flink.api.common.typeinfo.Types.LONG);
-    DataStream<Tuple2<String, Long>> dataStream = env.addSource(new FiniteTestSource<>(tuple2s), tupleTypeInfo);
+    DataStream<Row> dataStream = env.addSource(new FiniteTestSource<>(rows), WordCountData.FLINK_SCHEMA.toRowType());
 
     tEnv.createTemporaryView("words", tEnv.fromDataStream(dataStream, "word,num"));
 
@@ -130,7 +96,7 @@ public class TestFlinkTableSink extends AbstractTestBase {
       String ddl = String.format(
           "CREATE TABLE IcebergTable(" +
               "word string, " +
-              "num bigint) " +
+              "num int) " +
               "WITH (" +
               "'connector.type'='iceberg', " +
               "'connector.version'='0.8.0', " +
@@ -142,11 +108,7 @@ public class TestFlinkTableSink extends AbstractTestBase {
       tEnv.connect(Iceberg.newInstance()
           .withVersion(IcebergValidator.CONNECTOR_VERSION_VALUE)
           .withTableIdentifier(tableLocation))
-          .withSchema(new Schema().schema(
-              TableSchema.builder()
-                  .field("word", DataTypes.STRING())
-                  .field("num", DataTypes.BIGINT())
-                  .build()))
+          .withSchema(new Schema().schema(WordCountData.FLINK_SCHEMA))
           .inUpsertMode()
           .createTemporaryTable("IcebergTable");
     }
@@ -159,10 +121,10 @@ public class TestFlinkTableSink extends AbstractTestBase {
     List<Record> expected = Lists.newArrayList();
     for (int i = 0; i < 2; i++) { // two checkpoints in the FiniteTestSource.
       for (int k = 0; k < worlds.length; k++) {
-        expected.add(RECORD.copy(ImmutableMap.of("word", worlds[k], "num", k + 1L)));
+        expected.add(WordCountData.RECORD.copy(ImmutableMap.of("word", worlds[k], "num", k + 1)));
       }
     }
-    TestUtility.checkIcebergTableRecords(tableLocation, expected, RECORD_COMPARATOR);
+    TestUtility.checkIcebergTableRecords(tableLocation, expected, WordCountData.RECORD_COMPARATOR);
   }
 
   @Test
