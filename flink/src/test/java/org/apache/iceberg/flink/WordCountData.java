@@ -61,13 +61,13 @@ public class WordCountData {
 
   public static Table createTable(String tableIdentifier, boolean partitioned) {
     if (partitioned) {
-      return new HadoopTables().create(SCHEMA, tableIdentifier);
-    } else {
       PartitionSpec spec = PartitionSpec
           .builderFor(SCHEMA)
           .identity("word")
           .build();
       return new HadoopTables().create(SCHEMA, spec, tableIdentifier);
+    } else {
+      return new HadoopTables().create(SCHEMA, tableIdentifier);
     }
   }
 
