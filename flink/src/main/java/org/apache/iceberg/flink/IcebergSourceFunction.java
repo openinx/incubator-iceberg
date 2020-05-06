@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.flink;
 
+import java.util.List;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -31,9 +32,14 @@ import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.iceberg.DataFile;
+import org.apache.iceberg.DataOperations;
+import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.data.IcebergGenerics;
+import org.apache.iceberg.data.Record;
+import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.hadoop.SerializableConfiguration;
+import org.apache.iceberg.util.SnapshotUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,18 +58,17 @@ public class IcebergSourceFunction extends RichParallelSourceFunction<Row> imple
    * 2.    -> current data file index;
    * 3.    -> current data file offset.
    */
-
-
   private static final ListStateDescriptor<byte[]> ICEBERG_SOURCE_STATE = new ListStateDescriptor<>(
       "iceberg-source-state", BytePrimitiveArraySerializer.INSTANCE);
   private transient ListState<byte[]> globalStates;
 
   private transient Table table;
 
+  private volatile boolean running = true;
+
   public IcebergSourceFunction(String tableLocation, Configuration conf) {
     this.tableLocation = tableLocation;
     this.conf = new SerializableConfiguration(conf == null ? new Configuration() : conf);
-    Iterable<DataFile> dataFile = table.currentSnapshot().addedFiles();
   }
 
   @Override
@@ -73,7 +78,7 @@ public class IcebergSourceFunction extends RichParallelSourceFunction<Row> imple
 
   @Override
   public void initializeState(FunctionInitializationContext context) throws Exception {
-
+    this.table = new HadoopTables(conf.get()).load(tableLocation);
   }
 
   @Override
@@ -88,16 +93,31 @@ public class IcebergSourceFunction extends RichParallelSourceFunction<Row> imple
 
   @Override
   public void run(SourceContext<Row> ctx) throws Exception {
-
+    long lastConsumedSnapId = -1;
+    while (running) {
+      Thread.sleep(1000);
+      table.refresh();
+      List<Long> snapshotIds = SnapshotUtil.currentAncestors(table);
+      int index = snapshotIds.indexOf(lastConsumedSnapId);
+      if (index >= 0) {
+        snapshotIds = snapshotIds.subList(0, index);
+      }
+      for (int i = snapshotIds.size() - 1; i >= 0; i--) {
+        long snapshotId = snapshotIds.get(i);
+        Snapshot snapshot = table.snapshot(snapshotId);
+        assert snapshot.operation().equals(DataOperations.APPEND) : "Only support APPEND operation now.";
+        for (Record record : IcebergGenerics.read(table).useSnapshot(snapshotId).build()) {
+          // TODO It's <word, count> now, will try to convert record to a generic row.
+          ctx.collect(Row.of(record.getField("word"), record.getField("num")));
+        }
+        lastConsumedSnapId = snapshotId;
+      }
+    }
   }
 
   @Override
   public void cancel() {
-
-  }
-
-  private static class State {
-    private long snapshotId;
-
+    LOG.info("Cancel the iceberg source function.");
+    this.running = false;
   }
 }

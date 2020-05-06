@@ -19,7 +19,9 @@
 
 package org.apache.iceberg.flink;
 
+import com.google.common.collect.ImmutableMap;
 import java.util.Comparator;
+import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -40,8 +42,8 @@ public class WordCountData {
   }
 
   public static final Schema SCHEMA = new Schema(
-      Types.NestedField.optional(0, "word", Types.StringType.get()),
-      Types.NestedField.optional(1, "num", Types.IntegerType.get())
+      Types.NestedField.optional(1, "word", Types.StringType.get()),
+      Types.NestedField.optional(2, "num", Types.IntegerType.get())
   );
 
   public static final TableSchema FLINK_SCHEMA = TableSchema.builder()
@@ -60,15 +62,25 @@ public class WordCountData {
   };
 
   public static Table createTable(String tableIdentifier, boolean partitioned) {
+    return createTable(tableIdentifier, ImmutableMap.of(), partitioned);
+  }
+
+  public static Table createTable(String tableIdentifier, Map<String, String> properties, boolean partitioned) {
+    PartitionSpec spec;
     if (partitioned) {
-      PartitionSpec spec = PartitionSpec
-          .builderFor(SCHEMA)
-          .identity("word")
-          .build();
-      return new HadoopTables().create(SCHEMA, spec, tableIdentifier);
+      spec = PartitionSpec.builderFor(SCHEMA).identity("word").build();
     } else {
-      return new HadoopTables().create(SCHEMA, tableIdentifier);
+      spec = PartitionSpec.unpartitioned();
     }
+    return new HadoopTables().create(SCHEMA, spec, properties, tableIdentifier);
+  }
+
+  public static Record createRecord(String word, int num) {
+    return RECORD.copy(ImmutableMap.of("word", word, "num", num));
+  }
+
+  public static Transformer newTransformer() {
+    return new Transformer();
   }
 
   public static class Transformer implements MapFunction<Row, Tuple2<Boolean, Row>> {
