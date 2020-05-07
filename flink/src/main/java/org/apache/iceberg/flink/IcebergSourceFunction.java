@@ -20,6 +20,8 @@
 package org.apache.iceberg.flink;
 
 import java.util.List;
+import java.util.stream.Collectors;
+import org.apache.commons.compress.utils.Lists;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -32,13 +34,17 @@ import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.BaseCombinedScanTask;
+import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.DataOperations;
+import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.ManifestFile;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
-import org.apache.iceberg.data.IcebergGenerics;
-import org.apache.iceberg.data.Record;
+import org.apache.iceberg.flink.reader.RowReader;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.hadoop.SerializableConfiguration;
+import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.util.SnapshotUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,10 +112,26 @@ public class IcebergSourceFunction extends RichParallelSourceFunction<Row> imple
         long snapshotId = snapshotIds.get(i);
         Snapshot snapshot = table.snapshot(snapshotId);
         assert snapshot.operation().equals(DataOperations.APPEND) : "Only support APPEND operation now.";
-        for (Record record : IcebergGenerics.read(table).useSnapshot(snapshotId).build()) {
-          // TODO It's <word, count> now, will try to convert record to a generic row.
-          ctx.collect(Row.of(record.getField("word"), record.getField("num")));
+        List<ManifestFile> manifestFiles = snapshot
+            .manifests()
+            .stream()
+            .filter(m -> m.snapshotId() == snapshotId)
+            .collect(Collectors.toList());
+
+        CloseableIterable<FileScanTask> scanTasks = table.newScan().planFilesForManifests(manifestFiles, false);
+        // TODO need to split the scanTasks to several combined scan task.
+        CombinedScanTask combinedScanTask = new BaseCombinedScanTask(Lists.newArrayList(scanTasks.iterator()));
+
+        try (RowReader reader = new RowReader(combinedScanTask,
+            table.io(), table.schema() /*TODO should be read schema */,
+            table.encryption(),
+            true)) {
+          while (reader.next()) {
+            ctx.collect(reader.get());
+          }
         }
+
+        // Update the last consumed snapshot id to the lastest snapshot id.
         lastConsumedSnapId = snapshotId;
       }
     }

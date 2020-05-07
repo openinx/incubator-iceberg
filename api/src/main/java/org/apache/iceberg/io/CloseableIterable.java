@@ -108,6 +108,26 @@ public interface CloseableIterable<T> extends Iterable<T>, Closeable {
     }
   }
 
+  default CloseableIterator<T> closeableIterator() {
+    final Iterator<T> iterator = this.iterator();
+    return new CloseableIterator<T>() {
+      @Override
+      public void close() throws IOException {
+        CloseableIterable.this.close();
+      }
+
+      @Override
+      public boolean hasNext() {
+        return iterator.hasNext();
+      }
+
+      @Override
+      public T next() {
+        return iterator.next();
+      }
+    };
+  }
+
   class ConcatCloseableIterable<E> extends CloseableGroup implements CloseableIterable<E> {
     private final Iterable<CloseableIterable<E>> inputs;
 
@@ -122,7 +142,7 @@ public interface CloseableIterable<T> extends Iterable<T>, Closeable {
       return iter;
     }
 
-    private static class ConcatCloseableIterator<E> implements Iterator<E>, Closeable {
+    private static class ConcatCloseableIterator<E> implements CloseableIterator<E> {
       private final Iterator<CloseableIterable<E>> iterables;
       private CloseableIterable<E> currentIterable = null;
       private Iterator<E> currentIterator = null;

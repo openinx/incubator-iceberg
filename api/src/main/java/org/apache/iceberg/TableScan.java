@@ -21,6 +21,7 @@ package org.apache.iceberg;
 
 import com.google.common.collect.Lists;
 import java.util.Collection;
+import java.util.List;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableIterable;
 
@@ -173,6 +174,22 @@ public interface TableScan {
    * @return an Iterable of tasks for this scan
    */
   CloseableIterable<CombinedScanTask> planTasks();
+
+  /**
+   * Plan the {@link FileScanTask files} for the specified {@link ManifestFile manifests} that will be read by this
+   * scan.
+   * <p>
+   * Each file has a residual expression that should be applied to filter the file's rows.
+   * <p>
+   * This simple plan returns file scans for each file from position 0 to the file's length. For
+   * planning that will combine small files, split large files, and attempt to balance work, use
+   * {@link #planTasks()} instead.
+   *
+   * @param manifests        the specified manifests for this scan.
+   * @param filterAddedFiles whether to filter just added files or all files.
+   * @return an Iterable of file tasks that are required by this scan
+   */
+  CloseableIterable<FileScanTask> planFilesForManifests(List<ManifestFile> manifests, boolean filterAddedFiles);
 
   /**
    * Returns this scan's projection {@link Schema}.
