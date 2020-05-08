@@ -24,6 +24,7 @@ import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.util.List;
 import org.apache.flink.runtime.state.CheckpointListener;
+import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.test.util.AbstractTestBase;
@@ -34,8 +35,12 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TestFlinkSource extends AbstractTestBase {
+
+  private static final Logger LOG = LoggerFactory.getLogger(TestFlinkSource.class);
 
   private static final String[] WORDS = new String[]{"hello", "world", "foo", "bar", "apache", "software"};
   private static final Configuration CONF = new Configuration();
@@ -59,7 +64,7 @@ public class TestFlinkSource extends AbstractTestBase {
   public void testExactlyOnce() throws Exception {
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
     env.enableCheckpointing(500);
-    env.setParallelism(2);
+    env.setParallelism(1);
 
     IcebergSinkFunction icebergSink = IcebergSinkFunction.builder()
         .withTableSchema(WordCountData.FLINK_SCHEMA)
@@ -68,6 +73,7 @@ public class TestFlinkSource extends AbstractTestBase {
         .build();
 
     env.addSource(new TestRowSource(10))
+        .setParallelism(1)
         .map(new WordCountData.Transformer())
         .addSink(icebergSink)
         .setParallelism(2);
@@ -82,7 +88,7 @@ public class TestFlinkSource extends AbstractTestBase {
     // Assert that the source table has the expected records.
     TestUtility.checkIcebergTableRecords(srcTableLocation, expectedRecords, WordCountData.RECORD_COMPARATOR);
 
-    IcebergSourceFunction srcSource = new IcebergSourceFunction(srcTableLocation, CONF);
+    IcebergSourceFunction srcSource = new MockSourceFunction(srcTableLocation, CONF, 10);
     IcebergSinkFunction dstSink = IcebergSinkFunction.builder()
         .withTableSchema(WordCountData.FLINK_SCHEMA)
         .withTableLocation(dstTableLocation)
@@ -92,19 +98,35 @@ public class TestFlinkSource extends AbstractTestBase {
         .map(WordCountData.newTransformer())
         .addSink(dstSink)
         .setParallelism(1);
-    Thread timerKiller = new Thread(() -> {
-      try {
-        Thread.sleep(10000L);
-      } catch (InterruptedException e) {
-        throw new RuntimeException(e);
-      }
-      srcSource.cancel();
-    });
-    timerKiller.start();
     env.execute();
 
     // Assert that the destination table has the expected records.
     TestUtility.checkIcebergTableRecords(dstTableLocation, expectedRecords, WordCountData.RECORD_COMPARATOR);
+  }
+
+  static class MockSourceFunction extends IcebergSourceFunction {
+    private final int expectedSnapshotCount;
+
+    MockSourceFunction(String tableLocation, Configuration conf, int expectedSnapshotCount) {
+      super(tableLocation, conf);
+      this.expectedSnapshotCount = expectedSnapshotCount;
+    }
+
+    @Override
+    public void initializeState(FunctionInitializationContext context) throws Exception {
+      super.initializeState(context);
+      new Thread(() -> {
+        while (this.getConsumedSnapCount() < expectedSnapshotCount) {
+          try {
+            Thread.sleep(100L);
+          } catch (InterruptedException e) {
+            LOG.error("Encountered a exception: ", e);
+          }
+        }
+        // Cancel the source function.
+        this.cancel();
+      }).start();
+    }
   }
 
   static class TestRowSource implements SourceFunction<Row>, CheckpointListener {
@@ -124,13 +146,13 @@ public class TestFlinkSource extends AbstractTestBase {
         synchronized (ctx.getCheckpointLock()) {
           checkpointToAwait = i + 1;
           for (String word : WORDS) {
-            ctx.collect(Row.of(word, currentCheckpointsComplete));
+            ctx.collect(Row.of(word, i));
           }
         }
 
         synchronized (ctx.getCheckpointLock()) {
           while (running && currentCheckpointsComplete < checkpointToAwait) {
-            ctx.getCheckpointLock().wait(1);
+            ctx.getCheckpointLock().wait(100);
           }
         }
       }
