@@ -21,11 +21,11 @@ package org.apache.iceberg.flink.reader;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.encryption.EncryptedFiles;
@@ -46,12 +46,11 @@ public abstract class BaseRowReader<T> implements Closeable {
   BaseRowReader(CombinedScanTask task, FileIO fileIo, EncryptionManager encryptionManager) {
     this.fileIo = fileIo;
     this.tasks = task.files().iterator();
-    Iterable<InputFile> decryptedFiles = encryptionManager.decrypt(Iterables.transform(
-        task.files(),
-        fileScanTask ->
-            EncryptedFiles.encryptedInput(
-                this.fileIo.newInputFile(fileScanTask.file().path().toString()),
-                fileScanTask.file().keyMetadata())));
+    Iterable<InputFile> decryptedFiles = encryptionManager.decrypt(task.files().stream().map(fileScanTask ->
+        EncryptedFiles.encryptedInput(
+            this.fileIo.newInputFile(fileScanTask.file().path().toString()),
+            fileScanTask.file().keyMetadata()))
+        .collect(Collectors.toList()));
     ImmutableMap.Builder<String, InputFile> inputFileBuilder = ImmutableMap.builder();
     decryptedFiles.forEach(decrypted -> inputFileBuilder.put(decrypted.location(), decrypted));
     this.inputFiles = inputFileBuilder.build();
@@ -78,6 +77,7 @@ public abstract class BaseRowReader<T> implements Closeable {
     return current;
   }
 
+  @Override
   public void close() throws IOException {
     // close the current iterator
     this.closeableIter.close();
@@ -88,7 +88,7 @@ public abstract class BaseRowReader<T> implements Closeable {
     }
   }
 
-  protected InputFile getInputFile(FileScanTask task) {
+  InputFile getInputFile(FileScanTask task) {
     Preconditions.checkArgument(!task.isDataTask(), "Invalid task type");
     return inputFiles.get(task.file().path().toString());
   }

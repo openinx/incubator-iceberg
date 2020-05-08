@@ -20,10 +20,7 @@
 package org.apache.iceberg.flink;
 
 import java.util.concurrent.atomic.AtomicLong;
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.runtime.state.CheckpointListener;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
@@ -48,18 +45,10 @@ public class IcebergSourceFunction extends RichParallelSourceFunction<Row> imple
   private final SerializableConfiguration conf;
   private final AtomicLong consumedSnapCount = new AtomicLong(0L);
 
-  /**
-   * checkpointId:
-   * 1. currentSnapshotId;
-   * 2.    -> current data file index;
-   * 3.    -> current data file offset.
-   */
-  private static final ListStateDescriptor<byte[]> ICEBERG_SOURCE_STATE = new ListStateDescriptor<>(
-      "iceberg-source-state", BytePrimitiveArraySerializer.INSTANCE);
-  private transient ListState<byte[]> globalStates;
+  private long lastConsumedSnapId = -1L;
 
   private transient Table table;
-
+  private transient IncrementalFetcher fetcher;
   private volatile boolean running = true;
 
   public IcebergSourceFunction(String tableLocation, Configuration conf) {
@@ -89,10 +78,11 @@ public class IcebergSourceFunction extends RichParallelSourceFunction<Row> imple
 
   @Override
   public void run(SourceContext<Row> ctx) throws Exception {
-    long lastConsumedSnapId = -1;
+    int taskId = getRuntimeContext().getIndexOfThisSubtask();
+    int taskNum = getRuntimeContext().getNumberOfParallelSubtasks();
+    fetcher = new IncrementalFetcher(table, lastConsumedSnapId, ctx::collect, taskId, taskNum);
     while (running) {
       Thread.sleep(1000);
-      IncrementalFetcher fetcher = new IncrementalFetcher(table, lastConsumedSnapId, ctx::collect);
       try {
         fetcher.consumeNextSnap();
         consumedSnapCount.incrementAndGet();

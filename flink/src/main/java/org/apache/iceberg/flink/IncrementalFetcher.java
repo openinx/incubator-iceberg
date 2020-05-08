@@ -31,13 +31,18 @@ import org.apache.iceberg.util.SnapshotUtil;
 
 public class IncrementalFetcher {
   private final Table table;
-  private final Consumer<Row> rowConsumer;
   private long lastConsumedSnapshotId;
+  private final Consumer<Row> rowConsumer;
+  private final int taskId;
+  private final int taskNum;
 
-  public IncrementalFetcher(Table table, long lastConsumedSnapshotId, Consumer<Row> rowConsumer) {
+  public IncrementalFetcher(Table table, long lastConsumedSnapshotId, Consumer<Row> rowConsumer,
+                            int taskId, int taskNum) {
     this.table = table;
-    this.rowConsumer = rowConsumer;
     this.lastConsumedSnapshotId = lastConsumedSnapshotId;
+    this.rowConsumer = rowConsumer;
+    this.taskId = taskId;
+    this.taskNum = taskNum;
   }
 
   public long getLastConsumedSnapshotId() {

@@ -113,7 +113,9 @@ public interface CloseableIterable<T> extends Iterable<T>, Closeable {
     return new CloseableIterator<T>() {
       @Override
       public void close() throws IOException {
-        CloseableIterable.this.close();
+        if (iterator instanceof Closeable) {
+          ((Closeable) iterator).close();
+        }
       }
 
       @Override
