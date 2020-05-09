@@ -19,37 +19,22 @@
 
 package org.apache.iceberg.flink;
 
-import java.io.IOException;
 import java.util.List;
-import java.util.function.Consumer;
-import org.apache.flink.types.Row;
 import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.Table;
-import org.apache.iceberg.flink.reader.RowReader;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.util.SnapshotUtil;
 
 public class IncrementalFetcher {
   private final Table table;
   private long lastConsumedSnapshotId;
-  private final Consumer<Row> rowConsumer;
-  private final int taskId;
-  private final int taskNum;
 
-  public IncrementalFetcher(Table table, long lastConsumedSnapshotId, Consumer<Row> rowConsumer,
-                            int taskId, int taskNum) {
+  public IncrementalFetcher(Table table, long lastConsumedSnapshotId) {
     this.table = table;
     this.lastConsumedSnapshotId = lastConsumedSnapshotId;
-    this.rowConsumer = rowConsumer;
-    this.taskId = taskId;
-    this.taskNum = taskNum;
   }
 
-  public long getLastConsumedSnapshotId() {
-    return this.lastConsumedSnapshotId;
-  }
-
-  public void consumeNextSnap() throws IOException {
+  public CloseableIterable<CombinedScanTask> consumeNextSnap() {
     table.refresh();
     List<Long> snapshotIds = SnapshotUtil.currentAncestors(table);
     int index = snapshotIds.indexOf(lastConsumedSnapshotId);
@@ -66,21 +51,10 @@ public class IncrementalFetcher {
       } else {
         scanTasks = table.newScan().appendsBetween(lastConsumedSnapshotId, snapshotId).planTasks();
       }
-      try {
-        for (CombinedScanTask scanTask : scanTasks) {
-          try (RowReader reader = new RowReader(scanTask,
-              table.io(), table.schema() /*TODO should be read schema */,
-              table.encryption(),
-              true)) {
-            while (reader.next()) {
-              rowConsumer.accept(reader.get());
-            }
-          }
-        }
-      } finally {
-        scanTasks.close();
-      }
+      // Update the last consumed snpashot id to the lastest snapshot id.
       this.lastConsumedSnapshotId = snapshotId;
+      return scanTasks;
     }
+    return CloseableIterable.empty();
   }
 }

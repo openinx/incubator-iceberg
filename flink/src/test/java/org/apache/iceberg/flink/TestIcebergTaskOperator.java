@@ -17,34 +17,15 @@
  * under the License.
  */
 
-package org.apache.iceberg;
+package org.apache.iceberg.flink;
 
-import com.google.common.base.Joiner;
-import com.google.common.base.MoreObjects;
-import com.google.common.collect.Lists;
-import java.util.Collection;
-import java.util.List;
+import org.junit.Assert;
+import org.junit.Test;
 
-public class BaseCombinedScanTask implements CombinedScanTask {
-  private final List<FileScanTask> tasks;
+public class TestIcebergTaskOperator {
 
-  public BaseCombinedScanTask(FileScanTask... tasks) {
-    this.tasks = Lists.newArrayList(tasks);
-  }
-
-  public BaseCombinedScanTask(List<FileScanTask> tasks) {
-    this.tasks = Lists.newArrayList(tasks);
-  }
-
-  @Override
-  public Collection<FileScanTask> files() {
-    return tasks;
-  }
-
-  @Override
-  public String toString() {
-    return MoreObjects.toStringHelper(this)
-        .add("tasks", Joiner.on(", ").join(tasks))
-        .toString();
+  @Test
+  public void test() {
+    Assert.assertTrue(true);
   }
 }

@@ -24,7 +24,6 @@ import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.util.List;
 import org.apache.flink.runtime.state.CheckpointListener;
-import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.test.util.AbstractTestBase;
@@ -88,13 +87,12 @@ public class TestFlinkSource extends AbstractTestBase {
     // Assert that the source table has the expected records.
     TestUtility.checkIcebergTableRecords(srcTableLocation, expectedRecords, WordCountData.RECORD_COMPARATOR);
 
-    IcebergSourceFunction srcSource = new MockSourceFunction(srcTableLocation, CONF, 10);
     IcebergSinkFunction dstSink = IcebergSinkFunction.builder()
         .withTableSchema(WordCountData.FLINK_SCHEMA)
         .withTableLocation(dstTableLocation)
         .withConfiguration(CONF)
         .build();
-    env.addSource(srcSource)
+    IcebergSource.createSource(env, srcTableLocation, 1000L, 10L, CONF, WordCountData.FLINK_SCHEMA.toRowType())
         .map(WordCountData.newTransformer())
         .addSink(dstSink)
         .setParallelism(1);
@@ -102,31 +100,6 @@ public class TestFlinkSource extends AbstractTestBase {
 
     // Assert that the destination table has the expected records.
     TestUtility.checkIcebergTableRecords(dstTableLocation, expectedRecords, WordCountData.RECORD_COMPARATOR);
-  }
-
-  static class MockSourceFunction extends IcebergSourceFunction {
-    private final int expectedSnapshotCount;
-
-    MockSourceFunction(String tableLocation, Configuration conf, int expectedSnapshotCount) {
-      super(tableLocation, conf);
-      this.expectedSnapshotCount = expectedSnapshotCount;
-    }
-
-    @Override
-    public void initializeState(FunctionInitializationContext context) throws Exception {
-      super.initializeState(context);
-      new Thread(() -> {
-        while (this.getConsumedSnapCount() < expectedSnapshotCount) {
-          try {
-            Thread.sleep(100L);
-          } catch (InterruptedException e) {
-            LOG.error("Encountered a exception: ", e);
-          }
-        }
-        // Cancel the source function.
-        this.cancel();
-      }).start();
-    }
   }
 
   static class TestRowSource implements SourceFunction<Row>, CheckpointListener {
@@ -161,6 +134,7 @@ public class TestFlinkSource extends AbstractTestBase {
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
       currentCheckpointsComplete++;
+      LOG.info("Checkpoint with checkpoint id {} has been completed.", checkpointId);
     }
 
     @Override

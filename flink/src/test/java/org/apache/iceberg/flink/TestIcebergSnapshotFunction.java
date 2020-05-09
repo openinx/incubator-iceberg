@@ -19,23 +19,25 @@
 
 package org.apache.iceberg.flink;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.Set;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.functions.RuntimeContext;
+import org.apache.flink.api.common.state.ListState;
+import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.testutils.MockEnvironment;
 import org.apache.flink.runtime.operators.testutils.MockEnvironmentBuilder;
 import org.apache.flink.runtime.operators.testutils.MockInputSplitProvider;
+import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
@@ -43,6 +45,7 @@ import org.apache.flink.streaming.util.CollectingSourceContext;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.FileFormat;
@@ -50,6 +53,7 @@ import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.flink.data.FlinkParquetWriters;
+import org.apache.iceberg.flink.reader.RowReader;
 import org.apache.iceberg.hadoop.HadoopInputFile;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.parquet.Parquet;
@@ -63,7 +67,7 @@ import static org.apache.iceberg.hadoop.HadoopOutputFile.fromPath;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class TestFlinkSourceFunction {
+public class TestIcebergSnapshotFunction {
 
   private static final Configuration CONF = new Configuration();
 
@@ -71,12 +75,13 @@ public class TestFlinkSourceFunction {
   public TemporaryFolder tempFolder = new TemporaryFolder();
 
   private String tableLocation;
+  private Table table;
   private FileFormat fileFormat = FileFormat.PARQUET;
 
   @Before
   public void before() throws IOException {
     tableLocation = tempFolder.newFolder().getAbsolutePath();
-    Table table = WordCountData.createTable(tableLocation,
+    table = WordCountData.createTable(tableLocation,
         ImmutableMap.of(TableProperties.DEFAULT_FILE_FORMAT, fileFormat.name()),
         false);
 
@@ -117,28 +122,35 @@ public class TestFlinkSourceFunction {
 
   @Test
   public void testSource() throws Exception {
-    IcebergSourceFunction source = CommonTestUtils.createCopySerializable(
-        new IcebergSourceFunction(tableLocation, CONF));
-    List<Row> expectList = ImmutableList.of(
+    IcebergSnapshotFunction source = CommonTestUtils.createCopySerializable(
+        new IcebergSnapshotFunction(tableLocation, 1000L, 2, CONF));
+    Set<Row> expectRows = Sets.newHashSet(
         Row.of("hello", 1),
         Row.of("word", 1),
         Row.of("hello", 2),
         Row.of("word", 2)
     );
-    Timer timer = new Timer(true);
-    timer.schedule(new TimerTask() {
-      @Override
-      public void run() {
-        source.cancel();
-      }
-    }, 10000L);
-    List<Row> actualList = runRichSourceFunction(source);
-    Assert.assertEquals(expectList, actualList);
+    List<CombinedScanTask> scanTasks = runRichSourceFunction(source);
+    Set<Row> actualRows = Sets.newHashSet();
+    for (CombinedScanTask scanTask : scanTasks) {
+      actualRows.addAll(readRows(scanTask));
+    }
+    Assert.assertEquals(expectRows, actualRows);
   }
 
-  private static List<Row> runRichSourceFunction(IcebergSourceFunction sourceFunction)
+  private List<Row> readRows(CombinedScanTask scanTask) throws IOException {
+    try (RowReader reader = new RowReader(scanTask, table.io(), table.schema(), table.encryption(), true)) {
+      List<Row> rows = Lists.newArrayList();
+      while (reader.hasNext()) {
+        rows.add(reader.next());
+      }
+      return rows;
+    }
+  }
+
+  private static List<CombinedScanTask> runRichSourceFunction(IcebergSnapshotFunction function)
       throws Exception {
-    List<Row> outputs = Lists.newArrayList();
+    List<CombinedScanTask> outputs = Lists.newArrayList();
     try (MockEnvironment environment = new MockEnvironmentBuilder()
         .setTaskName("MockTask")
         .setInputSplitProvider(new MockInputSplitProvider())
@@ -152,12 +164,18 @@ public class TestFlinkSourceFunction {
           operator,
           environment,
           new HashMap<>());
-      sourceFunction.setRuntimeContext(runtimeContext);
-      sourceFunction.initializeState(null);
-      sourceFunction.open(new org.apache.flink.configuration.Configuration());
+      function.setRuntimeContext(runtimeContext);
+      FunctionInitializationContext context = mock(FunctionInitializationContext.class);
+      OperatorStateStore operatorState = mock(OperatorStateStore.class);
+      ListState<Long> listState = mock(ListState.class);
+      when(operatorState.getListState(IcebergSnapshotFunction.LAST_CONSUMED_SNAPSHOT_STATE)).thenReturn(listState);
+      when(context.getOperatorStateStore()).thenReturn(operatorState);
+      when(context.isRestored()).thenReturn(false);
+      function.initializeState(context);
+      function.open(new org.apache.flink.configuration.Configuration());
       try {
-        SourceFunction.SourceContext<Row> ctx = new CollectingSourceContext<>(new Object(), outputs);
-        sourceFunction.run(ctx);
+        SourceFunction.SourceContext<CombinedScanTask> ctx = new CollectingSourceContext<>(new Object(), outputs);
+        function.run(ctx);
       } catch (Exception e) {
         throw new RuntimeException("Cannot invoke source.", e);
       }

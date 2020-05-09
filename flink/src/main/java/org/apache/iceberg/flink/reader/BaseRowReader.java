@@ -21,7 +21,6 @@ package org.apache.iceberg.flink.reader;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
-import java.io.Closeable;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.Map;
@@ -30,12 +29,13 @@ import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.encryption.EncryptedFiles;
 import org.apache.iceberg.encryption.EncryptionManager;
+import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.InputFile;
 
-public abstract class BaseRowReader<T> implements Closeable {
+public abstract class BaseRowReader<T> implements CloseableIterator<T> {
   private final Iterator<FileScanTask> tasks;
   private final FileIO fileIo;
   private final Map<String, InputFile> inputFiles;
@@ -59,22 +59,34 @@ public abstract class BaseRowReader<T> implements Closeable {
 
   protected abstract CloseableIterator<T> open(FileScanTask task);
 
-  public boolean next() throws IOException {
-    while (true) {
-      if (closeableIter.hasNext()) {
-        this.current = closeableIter.next();
-        return true;
-      } else if (tasks.hasNext()) {
-        closeableIter.close();
-        closeableIter = open(tasks.next());
-      } else {
-        return false;
+  @Override
+  public boolean hasNext() {
+    if (current != null) {
+      return true;
+    } else {
+      while (true) {
+        if (closeableIter.hasNext()) {
+          this.current = closeableIter.next();
+          return true;
+        } else if (tasks.hasNext()) {
+          try {
+            closeableIter.close();
+          } catch (IOException e) {
+            throw new RuntimeIOException(e);
+          }
+          closeableIter = open(tasks.next());
+        } else {
+          return false;
+        }
       }
     }
   }
 
-  public T get() {
-    return current;
+  @Override
+  public T next() {
+    T result = current;
+    current = null;
+    return result;
   }
 
   @Override
