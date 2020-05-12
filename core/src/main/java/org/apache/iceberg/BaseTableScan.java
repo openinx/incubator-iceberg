@@ -30,7 +30,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 import org.apache.iceberg.events.Listeners;
@@ -219,11 +218,6 @@ abstract class BaseTableScan implements TableScan {
       LOG.info("Scanning empty table {}", table);
       return CloseableIterable.empty();
     }
-  }
-
-  @Override
-  public CloseableIterable<FileScanTask> planFilesForManifests(List<ManifestFile> manifests, boolean filterAddedFiles) {
-    throw new UnsupportedOperationException("Cannot plan files for manifests in base table scan");
   }
 
   @Override

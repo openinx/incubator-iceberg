@@ -31,6 +31,7 @@ import java.util.Set;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.util.SnapshotUtil;
+import org.apache.iceberg.util.ThreadPools;
 
 class IncrementalDataTableScan extends DataTableScan {
   private long fromSnapshotId;
@@ -87,17 +88,22 @@ class IncrementalDataTableScan extends DataTableScan {
         .filter(manifestFile -> snapshotIds.contains(manifestFile.snapshotId()))
         .toSet();
 
-    return super.planFilesForManifests(Lists.newArrayList(manifests), true);
-  }
+    ManifestGroup manifestGroup = new ManifestGroup(tableOps().io(), manifests)
+        .caseSensitive(isCaseSensitive())
+        .select(colStats() ? SCAN_WITH_STATS_COLUMNS : SCAN_COLUMNS)
+        .filterData(filter())
+        .filterManifestEntries(
+            manifestEntry ->
+                snapshotIds.contains(manifestEntry.snapshotId()) &&
+                manifestEntry.status() == ManifestEntry.Status.ADDED)
+        .specsById(tableOps().current().specsById())
+        .ignoreDeleted();
 
-  @Override
-  public CloseableIterable<FileScanTask> planFilesForManifests(List<ManifestFile> manifests, boolean filterAddedFiles) {
-    if (fromSnapshotId != 0L || toSnapshotId != 0L) {
-      throw new IllegalStateException("Cannot specify fromSnapshotId or toSnapshotId when plan files for specified " +
-          "manifests in incremental scan");
+    if (PLAN_SCANS_WITH_WORKER_POOL && manifests.size() > 1) {
+      manifestGroup = manifestGroup.planWith(ThreadPools.getWorkerPool());
     }
 
-    return super.planFilesForManifests(manifests, filterAddedFiles);
+    return manifestGroup.planFiles();
   }
 
   @Override

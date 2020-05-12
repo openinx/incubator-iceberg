@@ -23,10 +23,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.util.Collection;
-import java.util.List;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableIterable;
-import org.apache.iceberg.util.PropertyUtil;
 import org.apache.iceberg.util.ThreadPools;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,18 +43,14 @@ public class DataTableScan extends BaseTableScan {
   static final boolean PLAN_SCANS_WITH_WORKER_POOL =
       SystemProperties.getBoolean(SystemProperties.SCAN_THREAD_POOL_ENABLED, true);
 
-  private final boolean useWorkerPool;
-
   public DataTableScan(TableOperations ops, Table table) {
     super(ops, table, table.schema());
-    this.useWorkerPool = PropertyUtil.propertyAsBoolean(options(), "use-worker-pool", PLAN_SCANS_WITH_WORKER_POOL);
   }
 
   protected DataTableScan(TableOperations ops, Table table, Long snapshotId, Schema schema,
                           Expression rowFilter, boolean caseSensitive, boolean colStats,
                           Collection<String> selectedColumns, ImmutableMap<String, String> options) {
     super(ops, table, snapshotId, schema, rowFilter, caseSensitive, colStats, selectedColumns, options);
-    this.useWorkerPool = PropertyUtil.propertyAsBoolean(options(), "use-worker-pool", PLAN_SCANS_WITH_WORKER_POOL);
   }
 
   @Override
@@ -86,44 +80,21 @@ public class DataTableScan extends BaseTableScan {
         ops, table, snapshotId, schema, rowFilter, caseSensitive, colStats, selectedColumns, options);
   }
 
-  private CloseableIterable<FileScanTask> planFiles(TableOperations ops, List<ManifestFile> manifests,
-                                                    Expression rowFilter, boolean caseSensitive,
-                                                    boolean colStats, boolean filterAddedFiles) {
-    ManifestGroup manifestGroup = new ManifestGroup(ops.io(), manifests)
+  @Override
+  public CloseableIterable<FileScanTask> planFiles(TableOperations ops, Snapshot snapshot,
+                                                   Expression rowFilter, boolean caseSensitive, boolean colStats) {
+    ManifestGroup manifestGroup = new ManifestGroup(ops.io(), snapshot.manifests())
         .caseSensitive(caseSensitive)
         .select(colStats ? SCAN_WITH_STATS_COLUMNS : SCAN_COLUMNS)
         .filterData(rowFilter)
         .specsById(ops.current().specsById())
         .ignoreDeleted();
 
-    if (filterAddedFiles) {
-      manifestGroup =
-          manifestGroup.filterManifestEntries(manifestEntry -> manifestEntry.status() == ManifestEntry.Status.ADDED);
-    }
-
-    if (useWorkerPool && manifests.size() > 1) {
+    if (PLAN_SCANS_WITH_WORKER_POOL && snapshot.manifests().size() > 1) {
       manifestGroup = manifestGroup.planWith(ThreadPools.getWorkerPool());
     }
 
     return manifestGroup.planFiles();
-  }
-
-  @Override
-  public CloseableIterable<FileScanTask> planFiles(TableOperations ops, Snapshot snapshot,
-                                                   Expression rowFilter, boolean caseSensitive, boolean colStats) {
-    return planFiles(ops, snapshot.manifests(), rowFilter, caseSensitive, colStats, false);
-  }
-
-  @Override
-  public CloseableIterable<FileScanTask> planFilesForManifests(List<ManifestFile> manifests, boolean filterAddedFiles) {
-    if (snapshotId() != null) {
-      throw new IllegalStateException("Cannot specify snapshot id when plan files for specified manifests");
-    }
-    if (manifests.isEmpty()) {
-      return CloseableIterable.empty();
-    } else {
-      return planFiles(tableOps(), manifests, filter(), isCaseSensitive(), colStats(), filterAddedFiles);
-    }
   }
 
   @Override
