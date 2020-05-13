@@ -88,9 +88,7 @@ public class IcebergTaskOperator extends AbstractStreamOperator<Row>
         new ListStateDescriptor<>("iceberg-scan-split-task-states", BytePrimitiveArraySerializer.INSTANCE));
     if (ctx.isRestored()) {
       LOG.info("Restoring state from the {} (task-index={})", getClass().getSimpleName(), taskIdx);
-      Iterator<byte[]> iterator = scanTasksState.get().iterator();
-      Preconditions.checkArgument(iterator.hasNext(), "Should have at least one state to restore");
-      byte[] data = iterator.next();
+      byte[] data = scanTasksState.get().iterator().next();
       this.scanTaskSplits = this.serializer.deserialize(ScanTaskSplitsSerializer.SERIALIZATION_VERSION, data);
     }
   }

@@ -25,16 +25,16 @@ import org.apache.iceberg.Table;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.util.SnapshotUtil;
 
-public class IncrementalFetcher {
+class IncrementalSnapshotFetcher {
   private final Table table;
   private long lastConsumedSnapshotId;
 
-  public IncrementalFetcher(Table table, long lastConsumedSnapshotId) {
+  IncrementalSnapshotFetcher(Table table, long lastConsumedSnapshotId) {
     this.table = table;
     this.lastConsumedSnapshotId = lastConsumedSnapshotId;
   }
 
-  public CloseableIterable<CombinedScanTask> consumeNextSnap() {
+  CloseableIterable<CombinedScanTask> consumeNextSnap() {
     table.refresh();
     List<Long> snapshotIds = SnapshotUtil.currentAncestors(table);
     int index = snapshotIds.indexOf(lastConsumedSnapshotId);
@@ -56,5 +56,9 @@ public class IncrementalFetcher {
       return scanTasks;
     }
     return CloseableIterable.empty();
+  }
+
+  long getLastConsumedSnapshotId() {
+    return lastConsumedSnapshotId;
   }
 }

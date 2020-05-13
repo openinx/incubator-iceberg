@@ -88,13 +88,15 @@ public class IcebergSnapshotFunction extends RichSourceFunction<CombinedScanTask
 
   @Override
   public void run(SourceContext<CombinedScanTask> ctx) throws Exception {
-    IncrementalFetcher incrementalFetcher = new IncrementalFetcher(table, lastConsumedSnapId);
+    IncrementalSnapshotFetcher incrementalSnapshotFetcher = new IncrementalSnapshotFetcher(table, lastConsumedSnapId);
     while (running) {
       synchronized (ctx.getCheckpointLock()) {
-        CloseableIterable<CombinedScanTask> tasks = incrementalFetcher.consumeNextSnap();
+        CloseableIterable<CombinedScanTask> tasks = incrementalSnapshotFetcher.consumeNextSnap();
         for (CombinedScanTask task : tasks) {
           ctx.collect(task);
         }
+        // Refresh the last consumed snapshot id to the latest one.
+        this.lastConsumedSnapId = incrementalSnapshotFetcher.getLastConsumedSnapshotId();
       }
       if (--remainingSnapshots < 0L) {
         break;
