@@ -28,6 +28,7 @@ import org.apache.flink.table.descriptors.Schema;
 import org.apache.flink.table.descriptors.StreamTableDescriptorValidator;
 import org.apache.flink.table.factories.TableFactoryService;
 import org.apache.flink.table.sinks.TableSink;
+import org.apache.flink.table.sources.TableSource;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -59,7 +60,7 @@ public class TestIcebergTableFactory {
   }
 
   @Test
-  public void testTableSinkFactory() {
+  public void testTableSourceSinkFactory() {
     TableSchema schema = TableSchema.builder()
         .field(COL_0, DataTypes.ROW(DataTypes.FIELD(COL_1, DataTypes.INT())))
         .field(COL_1, DataTypes.ROW(
@@ -71,14 +72,22 @@ public class TestIcebergTableFactory {
             DataTypes.FIELD(FIELD_3, DataTypes.BOOLEAN())))
         .build();
 
-    DescriptorProperties descriptorProperties = createDescriptor(schema, "/tmp/test.txt");
+    // Test table source.
+    DescriptorProperties descriptorProperties = createDescriptor(schema, "/tmp/test0.txt");
+    TableSource source = TableFactoryService
+        .find(IcebergTableFactory.class, descriptorProperties.asMap(), this.getClass().getClassLoader())
+        .createTableSource(descriptorProperties.asMap());
+    Assert.assertTrue(source instanceof IcebergTableSource);
+    IcebergTableSource iSource = (IcebergTableSource) source;
+    Assert.assertEquals(schema, iSource.getTableSchema());
+
+    // Test table sink.
+    descriptorProperties = createDescriptor(schema, "/tmp/test1.txt");
     TableSink sink = TableFactoryService
         .find(IcebergTableFactory.class, descriptorProperties.asMap(), this.getClass().getClassLoader())
         .createTableSink(descriptorProperties.asMap());
-
     Assert.assertTrue(sink instanceof IcebergTableSink);
     IcebergTableSink iSink = (IcebergTableSink) sink;
-
     Assert.assertEquals(schema, iSink.getTableSchema());
   }
 }
