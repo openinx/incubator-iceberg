@@ -21,18 +21,50 @@ package org.apache.iceberg.flink;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+import java.io.IOException;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import org.apache.flink.types.Row;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.iceberg.DataFile;
+import org.apache.iceberg.DataFiles;
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
+import org.apache.iceberg.flink.data.FlinkParquetWriters;
+import org.apache.iceberg.hadoop.HadoopInputFile;
 import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.io.FileAppender;
+import org.apache.iceberg.parquet.Parquet;
 import org.junit.Assert;
+
+import static org.apache.iceberg.hadoop.HadoopOutputFile.fromPath;
 
 public class TestUtility {
 
   private TestUtility() {
 
+  }
+
+  public static DataFile writeRecords(Collection<Row> rows, Schema schema, Path path) throws IOException {
+    Configuration conf = new Configuration();
+    FileAppender<Row> parquetAppender = Parquet.write(fromPath(path, conf))
+        .schema(schema)
+        .createWriterFunc(FlinkParquetWriters::buildWriter)
+        .build();
+    try {
+      parquetAppender.addAll(rows);
+    } finally {
+      parquetAppender.close();
+    }
+    return DataFiles.builder(PartitionSpec.unpartitioned())
+        .withInputFile(HadoopInputFile.fromPath(path, conf))
+        .withMetrics(parquetAppender.metrics())
+        .build();
   }
 
   /**
@@ -53,5 +85,17 @@ public class TestUtility {
     expected.sort(comparator);
     results.sort(comparator);
     Assert.assertEquals("Should produce the expected record", expected, results);
+  }
+
+  public static void checkTableSameRecords(String srcTableLocation,
+                                           String dstTableLocation,
+                                           Comparator<Record> comparator) {
+    Table srcTable = new HadoopTables().load(srcTableLocation);
+    Table dstTable = new HadoopTables().load(dstTableLocation);
+    List<Record> srcRecords = Lists.newArrayList(IcebergGenerics.read(srcTable).build());
+    List<Record> dstRecords = Lists.newArrayList(IcebergGenerics.read(dstTable).build());
+    srcRecords.sort(comparator);
+    dstRecords.sort(comparator);
+    Assert.assertEquals("Should produce the expected record", srcRecords, dstRecords);
   }
 }

@@ -73,7 +73,7 @@ class IcebergTableSource implements ProjectableTableSource<Row>, StreamTableSour
           .build()
           .toRowDataType();
     }
-    return result.bridgedTo(BaseRow.class);
+    return result.bridgedTo(Row.class);
   }
 
   @Override

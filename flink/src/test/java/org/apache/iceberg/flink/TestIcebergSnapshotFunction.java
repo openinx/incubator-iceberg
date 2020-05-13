@@ -24,7 +24,6 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
@@ -47,23 +46,16 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.DataFile;
-import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.FileFormat;
-import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
-import org.apache.iceberg.flink.data.FlinkParquetWriters;
 import org.apache.iceberg.flink.reader.RowReader;
-import org.apache.iceberg.hadoop.HadoopInputFile;
-import org.apache.iceberg.io.FileAppender;
-import org.apache.iceberg.parquet.Parquet;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import static org.apache.iceberg.hadoop.HadoopOutputFile.fromPath;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -86,14 +78,12 @@ public class TestIcebergSnapshotFunction {
         false);
 
     // Write few records and assert them.
-    List<Row> records1 = Arrays.asList(Row.of("hello", 1), Row.of("word", 1));
-    List<Row> records2 = Arrays.asList(Row.of("hello", 2), Row.of("word", 2));
-
-    DataFile file1 = writeRecords(records1, new Path(tableLocation, fileFormat.addExtension("file1")));
-    table.newAppend().appendFile(file1).commit();
-
-    DataFile file2 = writeRecords(records2, new Path(tableLocation, fileFormat.addExtension("file2")));
-    table.newAppend().appendFile(file2).commit();
+    for (int i = 0; i < 2; i++) {
+      List<Row> records = Arrays.asList(Row.of("hello", i + 1), Row.of("word", i + 1));
+      DataFile file = TestUtility.writeRecords(records, WordCountData.SCHEMA,
+          new Path(tableLocation, fileFormat.addExtension("file" + (i + 1))));
+      table.newAppend().appendFile(file).commit();
+    }
 
     TestUtility.checkIcebergTableRecords(tableLocation, Lists.newArrayList(
         WordCountData.createRecord("hello", 1),
@@ -101,23 +91,6 @@ public class TestIcebergSnapshotFunction {
         WordCountData.createRecord("hello", 2),
         WordCountData.createRecord("word", 2)),
         WordCountData.RECORD_COMPARATOR);
-  }
-
-  private DataFile writeRecords(Collection<Row> rows,
-                                Path path) throws IOException {
-    FileAppender<Row> parquetAppender = Parquet.write(fromPath(path, CONF))
-        .schema(WordCountData.SCHEMA)
-        .createWriterFunc(FlinkParquetWriters::buildWriter)
-        .build();
-    try {
-      parquetAppender.addAll(rows);
-    } finally {
-      parquetAppender.close();
-    }
-    return DataFiles.builder(PartitionSpec.unpartitioned())
-        .withInputFile(HadoopInputFile.fromPath(path, CONF))
-        .withMetrics(parquetAppender.metrics())
-        .build();
   }
 
   @Test
