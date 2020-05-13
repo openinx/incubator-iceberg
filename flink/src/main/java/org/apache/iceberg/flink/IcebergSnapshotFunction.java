@@ -31,7 +31,6 @@ import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.hadoop.SerializableConfiguration;
-import org.apache.iceberg.io.CloseableIterable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +38,8 @@ public class IcebergSnapshotFunction extends RichSourceFunction<CombinedScanTask
 
   private static final Logger LOG = LoggerFactory.getLogger(IcebergSnapshotFunction.class);
   private static final long serialVersionUID = 1L;
+  static final long NON_CONSUMED_SNAPSHOT_ID = -1L;
+
   static final ListStateDescriptor<Long> LAST_CONSUMED_SNAPSHOT_STATE = new ListStateDescriptor<>(
       "last-consumed-snapshot-state", LongSerializer.INSTANCE);
 
@@ -51,7 +52,7 @@ public class IcebergSnapshotFunction extends RichSourceFunction<CombinedScanTask
   private final SerializableConfiguration conf;
   private long remainingSnapshots = Long.MAX_VALUE;
 
-  private long lastConsumedSnapId = -1L;
+  private long lastConsumedSnapId = NON_CONSUMED_SNAPSHOT_ID;
 
   private transient Table table;
   private volatile boolean running = true;
@@ -65,7 +66,7 @@ public class IcebergSnapshotFunction extends RichSourceFunction<CombinedScanTask
     this.tableLocation = tableLocation;
     this.intervalMillis = intervalMillis;
     this.remainingSnapshots = remainingSnapshots;
-    this.conf = new SerializableConfiguration(conf == null ? new Configuration() : conf);
+    this.conf = new SerializableConfiguration(conf);
   }
 
   @Override
@@ -91,8 +92,10 @@ public class IcebergSnapshotFunction extends RichSourceFunction<CombinedScanTask
     IncrementalSnapshotFetcher incrementalSnapshotFetcher = new IncrementalSnapshotFetcher(table, lastConsumedSnapId);
     while (running) {
       synchronized (ctx.getCheckpointLock()) {
-        CloseableIterable<CombinedScanTask> tasks = incrementalSnapshotFetcher.consumeNextSnap();
-        for (CombinedScanTask task : tasks) {
+        // Here we will transform many scan tasks to the downstream operator, it's possible that the job crashed when
+        // we collect partial of them. Once restored the task then the downstream operator will receive the duplicated
+        // scan task, so the downstream should handle the duplicated task.
+        for (CombinedScanTask task : incrementalSnapshotFetcher.consumeNextSnap()) {
           ctx.collect(task);
         }
         // Refresh the last consumed snapshot id to the latest one.

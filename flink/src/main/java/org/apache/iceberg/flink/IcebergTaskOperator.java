@@ -19,14 +19,12 @@
 
 package org.apache.iceberg.flink;
 
-import com.google.common.base.Preconditions;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Deque;
-import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.NoSuchElementException;
 import org.apache.flink.api.common.state.ListState;
@@ -66,6 +64,9 @@ public class IcebergTaskOperator extends AbstractStreamOperator<Row>
   private transient ListState<byte[]> scanTasksState;
   private transient SourceFunction.SourceContext<Row> sourceContext;
   private transient MailboxExecutor executor;
+  // Now we use the queue to buffer the unhandled scan task, while actually there's possible that the upstream will
+  // reproduce the duplicated scan task, so here it would need a MAP/SET to remove the duplicated task. (TODO).
+  // By the way, we should handle the task by the order of sequence number DESC in future update/delete implementation.
   private transient Deque<ScanTaskSplit> scanTaskSplits;
   private transient ScanTaskSplitsSerializer serializer;
 
