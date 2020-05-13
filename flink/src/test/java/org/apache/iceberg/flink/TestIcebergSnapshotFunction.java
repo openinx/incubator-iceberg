@@ -123,7 +123,7 @@ public class TestIcebergSnapshotFunction {
   @Test
   public void testSource() throws Exception {
     IcebergSnapshotFunction source = CommonTestUtils.createCopySerializable(
-        new IcebergSnapshotFunction(tableLocation, 1000L, 2, CONF));
+        new IcebergSnapshotFunction(tableLocation, CONF, 1000L, 2));
     Set<Row> expectRows = Sets.newHashSet(
         Row.of("hello", 1),
         Row.of("word", 1),

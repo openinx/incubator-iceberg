@@ -42,11 +42,13 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.types.Row;
 import org.apache.iceberg.CombinedScanTask;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.flink.reader.RowReader;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.hadoop.SerializableConfiguration;
 import org.apache.iceberg.io.CloseableIterator;
+import org.apache.iceberg.types.TypeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,6 +60,7 @@ public class IcebergTaskOperator extends AbstractStreamOperator<Row>
   /* Serializable fields */
   private final String tableLocation;
   private final SerializableConfiguration conf;
+  private Schema readSchema;
 
   /* Non-serializable fields */
   private transient Table table;
@@ -70,9 +73,11 @@ public class IcebergTaskOperator extends AbstractStreamOperator<Row>
   private transient Deque<ScanTaskSplit> scanTaskSplits;
   private transient ScanTaskSplitsSerializer serializer;
 
-  public IcebergTaskOperator(String tableLocation, SerializableConfiguration conf, MailboxExecutor executor) {
+  public IcebergTaskOperator(String tableLocation, SerializableConfiguration conf,
+                             Schema readSchema, MailboxExecutor executor) {
     this.tableLocation = tableLocation;
     this.conf = conf;
+    this.readSchema = readSchema;
     this.executor = executor;
   }
 
@@ -81,6 +86,10 @@ public class IcebergTaskOperator extends AbstractStreamOperator<Row>
     super.initializeState(ctx);
 
     this.table = new HadoopTables(conf.get()).load(tableLocation);
+    if (this.readSchema != null) {
+      // Reassign ids to match the base schema.
+      readSchema = TypeUtil.reassignIds(readSchema, table.schema());
+    }
     int taskIdx = getRuntimeContext().getIndexOfThisSubtask();
     this.serializer = new ScanTaskSplitsSerializer();
 
@@ -188,8 +197,7 @@ public class IcebergTaskOperator extends AbstractStreamOperator<Row>
     }
 
     private void initReader() {
-      // TODO will use the read schema to filter the columns etc.
-      this.reader = new RowReader(this.scanTask, table.io(), table.schema(), table.encryption(), true);
+      this.reader = new RowReader(this.scanTask, table.io(), readSchema, table.encryption(), true);
       // Drop all the consumed rows firstly.
       for (int i = 0; i < consumedOffset; i++) {
         if (reader.hasNext()) {

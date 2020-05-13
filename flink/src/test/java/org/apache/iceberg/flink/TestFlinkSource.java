@@ -22,14 +22,19 @@ package org.apache.iceberg.flink;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import org.apache.flink.runtime.state.CheckpointListener;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.data.Record;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -92,14 +97,32 @@ public class TestFlinkSource extends AbstractTestBase {
         .withTableLocation(dstTableLocation)
         .withConfiguration(CONF)
         .build();
-    IcebergSource.createSource(env, srcTableLocation, 1000L, 10L, CONF, WordCountData.FLINK_SCHEMA.toRowType())
+    IcebergSource.createSource(env, srcTableLocation, CONF, 1000L, 10L, WordCountData.FLINK_SCHEMA)
         .map(WordCountData.newTransformer())
         .addSink(dstSink)
         .setParallelism(1);
     env.execute();
 
-    // Assert that the destination table has the expected records.
+    // Assert that the destination table has the expected records
     TestUtility.checkIcebergTableRecords(dstTableLocation, expectedRecords, WordCountData.RECORD_COMPARATOR);
+
+    // Try to read parts of the table columns in a new streaming JOB.
+    TableSchema wordColumn = TableSchema.builder().field("word", DataTypes.STRING()).build();
+    String file = temp.newFile().toURI().toString();
+    IcebergSource.createSource(env, srcTableLocation, CONF,
+        1000L, 10L, wordColumn)
+        .writeAsText(file);
+    env.execute();
+
+    List<String> expectWords = Lists.newArrayList();
+    for (int i = 0; i < 10; i++) {
+      expectWords.addAll(Arrays.asList(WORDS));
+    }
+    List<String> actualWords = Lists.newArrayList();
+    readAllResultLines(actualWords, file);
+    Collections.sort(expectWords);
+    Collections.sort(actualWords);
+    Assert.assertEquals(expectWords, actualWords);
   }
 
   static class TestRowSource implements SourceFunction<Row>, CheckpointListener {

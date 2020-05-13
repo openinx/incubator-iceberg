@@ -60,13 +60,13 @@ public class IcebergSnapshotFunction extends RichSourceFunction<CombinedScanTask
   private transient ListState<Long> consumedSnapState;
 
   public IcebergSnapshotFunction(String tableLocation,
+                                 Configuration conf,
                                  long intervalMillis,
-                                 long remainingSnapshots,
-                                 Configuration conf) {
+                                 long remainingSnapshots) {
     this.tableLocation = tableLocation;
+    this.conf = new SerializableConfiguration(conf);
     this.intervalMillis = intervalMillis;
     this.remainingSnapshots = remainingSnapshots;
-    this.conf = new SerializableConfiguration(conf);
   }
 
   @Override

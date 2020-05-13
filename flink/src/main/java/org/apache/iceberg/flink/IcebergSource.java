@@ -19,7 +19,6 @@
 
 package org.apache.iceberg.flink;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamConfig;
@@ -32,9 +31,11 @@ import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.YieldingOperatorFactory;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
+import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.CombinedScanTask;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.hadoop.SerializableConfiguration;
 
 public class IcebergSource {
@@ -44,27 +45,29 @@ public class IcebergSource {
 
   public static DataStream<Row> createSource(StreamExecutionEnvironment env,
                                              String tableLocation,
-                                             long intervalMillis,
                                              Configuration conf,
-                                             TypeInformation<Row> outTypeInfo) {
-    return createSource(env, tableLocation, intervalMillis, Long.MAX_VALUE, conf, outTypeInfo);
+                                             long intervalMillis,
+                                             TableSchema readSchema) {
+    return createSource(env, tableLocation, conf, intervalMillis, Long.MAX_VALUE, readSchema);
   }
 
   /**
    * Mainly used for unit test.
    */
   public static DataStream<Row> createSource(StreamExecutionEnvironment env,
-                                      String tableLocation,
-                                      long intervalMillis,
-                                      long remainingSnapshot,
-                                      Configuration conf,
-                                      TypeInformation<Row> outTypeInfo) {
-    IcebergSnapshotFunction snapshotFunc = new IcebergSnapshotFunction(tableLocation,
-        intervalMillis, remainingSnapshot, conf);
-    IcebergTaskOperatorFactory factory = new IcebergTaskOperatorFactory(tableLocation, conf);
+                                             String tableLocation,
+                                             Configuration conf,
+                                             long intervalMillis,
+                                             long remainingSnapshot,
+                                             TableSchema readSchema) {
+    IcebergSnapshotFunction snapshotFunc = new IcebergSnapshotFunction(tableLocation, conf,
+        intervalMillis, remainingSnapshot);
+    // The TableSchema is not serializable so need to convert to Iceberg schema firstly here.
+    Schema icebergReadSchema = FlinkSchemaUtil.convert(readSchema);
+    IcebergTaskOperatorFactory factory = new IcebergTaskOperatorFactory(tableLocation, conf, icebergReadSchema);
     return env.addSource(snapshotFunc, "IcebergSnapshotFunction")
         .forceNonParallel()
-        .transform("IcebergTaskOperator", outTypeInfo, factory);
+        .transform("IcebergTaskOperator", readSchema.toRowType(), factory);
   }
 
   private static class IcebergTaskOperatorFactory implements OneInputStreamOperatorFactory<CombinedScanTask, Row>,
@@ -72,12 +75,14 @@ public class IcebergSource {
 
     private final String tableLocation;
     private final SerializableConfiguration conf;
+    private final Schema readSchema;
     private MailboxExecutor mailboxExecutor;
     private ChainingStrategy strategy = ChainingStrategy.ALWAYS;
 
-    IcebergTaskOperatorFactory(String tableLocation, Configuration conf) {
+    IcebergTaskOperatorFactory(String tableLocation, Configuration conf, Schema readSchema) {
       this.tableLocation = tableLocation;
       this.conf = new SerializableConfiguration(conf);
+      this.readSchema = readSchema;
     }
 
     @Override
@@ -89,7 +94,7 @@ public class IcebergSource {
     public <T extends StreamOperator<Row>> T createStreamOperator(StreamTask<?, ?> containingTask,
                                                                   StreamConfig config,
                                                                   Output<StreamRecord<Row>> output) {
-      IcebergTaskOperator operator = new IcebergTaskOperator(tableLocation, conf, this.mailboxExecutor);
+      IcebergTaskOperator operator = new IcebergTaskOperator(tableLocation, conf, readSchema, mailboxExecutor);
       operator.setup(containingTask, config, output);
       return (T) operator;
     }
