@@ -41,7 +41,7 @@ class IncrementalSnapshotFetcher {
 
     // Read the un-consumed snapshot id list, the list is from newest to oldest.
     List<Long> snapshotIds = SnapshotUtil.currentAncestors(table);
-    int index = snapshotIds.indexOf(lastConsumedSnapshotId);
+    int index = snapshotIds.lastIndexOf(lastConsumedSnapshotId);
     if (index >= 0) {
       snapshotIds = snapshotIds.subList(0, index);
     }

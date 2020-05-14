@@ -50,9 +50,10 @@ public class IcebergSnapshotFunction extends RichSourceFunction<CombinedScanTask
 
   private final String tableLocation;
   private final SerializableConfiguration conf;
+  private final long fromSnapshotId;
   private long remainingSnapshots = Long.MAX_VALUE;
 
-  private long lastConsumedSnapId = NON_CONSUMED_SNAPSHOT_ID;
+  private long lastConsumedSnapId = IcebergSource.NON_CONSUMED_SNAPSHOT_ID;
 
   private transient Table table;
   private volatile boolean running = true;
@@ -61,10 +62,12 @@ public class IcebergSnapshotFunction extends RichSourceFunction<CombinedScanTask
 
   public IcebergSnapshotFunction(String tableLocation,
                                  Configuration conf,
+                                 long fromSnapshotId,
                                  long intervalMillis,
                                  long remainingSnapshots) {
     this.tableLocation = tableLocation;
     this.conf = new SerializableConfiguration(conf);
+    this.fromSnapshotId = fromSnapshotId;
     this.intervalMillis = intervalMillis;
     this.remainingSnapshots = remainingSnapshots;
   }
@@ -73,6 +76,10 @@ public class IcebergSnapshotFunction extends RichSourceFunction<CombinedScanTask
   public void initializeState(FunctionInitializationContext context) throws Exception {
     this.table = new HadoopTables(conf.get()).load(tableLocation);
     this.consumedSnapState = context.getOperatorStateStore().getListState(LAST_CONSUMED_SNAPSHOT_STATE);
+    // When staring the streaming job first time, we could specific a from-snapshot-id to start consuming. It only works
+    // in the first job starting, the following restored job would use the last-consumed-snapshot-id maintained in
+    // state backend.
+    this.lastConsumedSnapId = fromSnapshotId;
     if (context.isRestored()) {
       LOG.info("Restoring state for the {}.", getClass().getSimpleName());
       this.lastConsumedSnapId = this.consumedSnapState.get().iterator().next();

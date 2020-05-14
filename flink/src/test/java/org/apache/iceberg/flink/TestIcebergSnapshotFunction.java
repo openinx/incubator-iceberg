@@ -96,7 +96,7 @@ public class TestIcebergSnapshotFunction {
   @Test
   public void testSource() throws Exception {
     IcebergSnapshotFunction source = CommonTestUtils.createCopySerializable(
-        new IcebergSnapshotFunction(tableLocation, CONF, 1000L, 2));
+        new IcebergSnapshotFunction(tableLocation, CONF, IcebergSource.NON_CONSUMED_SNAPSHOT_ID, 1000L, 2));
     Set<Row> expectRows = Sets.newHashSet(
         Row.of("hello", 1),
         Row.of("word", 1),

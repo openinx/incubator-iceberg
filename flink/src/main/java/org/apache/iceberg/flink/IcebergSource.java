@@ -40,15 +40,18 @@ import org.apache.iceberg.hadoop.SerializableConfiguration;
 
 public class IcebergSource {
 
+  public static final long NON_CONSUMED_SNAPSHOT_ID = -1L;
+
   private IcebergSource() {
   }
 
   public static DataStream<Row> createSource(StreamExecutionEnvironment env,
                                              String tableLocation,
                                              Configuration conf,
+                                             long fromSnapshotId,
                                              long intervalMillis,
                                              TableSchema readSchema) {
-    return createSource(env, tableLocation, conf, intervalMillis, Long.MAX_VALUE, readSchema);
+    return createSource(env, tableLocation, conf, fromSnapshotId, intervalMillis, Long.MAX_VALUE, readSchema);
   }
 
   /**
@@ -57,10 +60,11 @@ public class IcebergSource {
   public static DataStream<Row> createSource(StreamExecutionEnvironment env,
                                              String tableLocation,
                                              Configuration conf,
+                                             long fromSnapshotId,
                                              long intervalMillis,
                                              long remainingSnapshot,
                                              TableSchema readSchema) {
-    IcebergSnapshotFunction snapshotFunc = new IcebergSnapshotFunction(tableLocation, conf,
+    IcebergSnapshotFunction snapshotFunc = new IcebergSnapshotFunction(tableLocation, conf, fromSnapshotId,
         intervalMillis, remainingSnapshot);
     // The TableSchema is not serializable so need to convert to Iceberg schema firstly here.
     Schema icebergReadSchema = FlinkSchemaUtil.convert(readSchema);

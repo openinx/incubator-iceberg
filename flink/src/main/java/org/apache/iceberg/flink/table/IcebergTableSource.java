@@ -24,7 +24,6 @@ import java.util.Arrays;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableSchema;
-import org.apache.flink.table.dataformat.BaseRow;
 import org.apache.flink.table.sources.ProjectableTableSource;
 import org.apache.flink.table.sources.StreamTableSource;
 import org.apache.flink.table.sources.TableSource;
@@ -36,27 +35,32 @@ import org.apache.iceberg.flink.IcebergSource;
 
 class IcebergTableSource implements ProjectableTableSource<Row>, StreamTableSource<Row> {
 
-  private static final long MAX_POLLING_INTERVAL_MILLIS = 1000L;
   private final String tableIdentifier;
   private final Configuration conf;
+  private final long fromSnapshotId;
+  private final long snapshotPollingIntervalMillis;
   private final TableSchema tableSchema;
   private final int[] projectedFields;
 
-  IcebergTableSource(String tableIdentifier, Configuration conf, TableSchema tableSchema) {
-    this(tableIdentifier, conf, tableSchema, null);
+  IcebergTableSource(String tableIdentifier, Configuration conf, long fromSnapshotId,
+                     long snapshotPollingIntervalMillis, TableSchema tableSchema) {
+    this(tableIdentifier, conf, fromSnapshotId, snapshotPollingIntervalMillis, tableSchema, null);
   }
 
-  private IcebergTableSource(String tableIdentifier, Configuration conf,
-                             TableSchema tableSchema, int[] projectedFields) {
+  private IcebergTableSource(String tableIdentifier, Configuration conf, long fromSnapshotId,
+                             long snapshotPollingIntervalMillis, TableSchema tableSchema, int[] projectedFields) {
     this.tableIdentifier = tableIdentifier;
     this.conf = conf;
+    this.fromSnapshotId = fromSnapshotId;
+    this.snapshotPollingIntervalMillis = snapshotPollingIntervalMillis;
     this.tableSchema = tableSchema;
     this.projectedFields = projectedFields;
   }
 
   @Override
   public DataStream<Row> getDataStream(StreamExecutionEnvironment env) {
-    return IcebergSource.createSource(env, tableIdentifier, conf, MAX_POLLING_INTERVAL_MILLIS, tableSchema);
+    return IcebergSource.createSource(env, tableIdentifier, conf, fromSnapshotId,
+        snapshotPollingIntervalMillis, tableSchema);
   }
 
   @Override
@@ -88,6 +92,7 @@ class IcebergTableSource implements ProjectableTableSource<Row>, StreamTableSour
 
   @Override
   public TableSource<Row> projectFields(int[] fields) {
-    return new IcebergTableSource(tableIdentifier, conf, tableSchema, fields);
+    return new IcebergTableSource(tableIdentifier, conf, fromSnapshotId,
+        snapshotPollingIntervalMillis, tableSchema, fields);
   }
 }

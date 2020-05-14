@@ -34,6 +34,11 @@ class IcebergValidator extends ConnectorDescriptorValidator {
 
   public static final String CONNECTOR_ICEBERG_TABLE_IDENTIFIER = "connector.iceberg-table.identifier";
 
+  public static final String CONNECTOR_ICEBERG_TABLE_FROM_SNAPSHOT_ID = "connector.iceberg-table.from-snapshot-id";
+
+  public static final String CONNECTOR_ICEBERG_TABLE_SNAP_POLLING_INTERVAL_MILLIS =
+      "connector.iceberg-table.snapshots-polling-interval-millis";
+
   private static final IcebergValidator INSTANCE = new IcebergValidator();
 
   @Override
@@ -41,6 +46,8 @@ class IcebergValidator extends ConnectorDescriptorValidator {
     super.validate(properties);
     properties.validateValue(CONNECTOR_TYPE, CONNECTOR_TYPE_VALUE, false);
     properties.validateString(CONNECTOR_ICEBERG_TABLE_IDENTIFIER, false, 1);
+    properties.validateLong(CONNECTOR_ICEBERG_TABLE_FROM_SNAPSHOT_ID, true, 1);
+    properties.validateLong(CONNECTOR_ICEBERG_TABLE_SNAP_POLLING_INTERVAL_MILLIS, true, 1);
   }
 
   public static IcebergValidator getInstance() {

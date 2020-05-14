@@ -97,7 +97,8 @@ public class TestFlinkSource extends AbstractTestBase {
         .withTableLocation(dstTableLocation)
         .withConfiguration(CONF)
         .build();
-    IcebergSource.createSource(env, srcTableLocation, CONF, 1000L, 10L, WordCountData.FLINK_SCHEMA)
+    IcebergSource.createSource(env, srcTableLocation, CONF, IcebergSource.NON_CONSUMED_SNAPSHOT_ID,
+        1000L, 10L, WordCountData.FLINK_SCHEMA)
         .map(WordCountData.newTransformer())
         .addSink(dstSink)
         .setParallelism(1);
@@ -109,7 +110,7 @@ public class TestFlinkSource extends AbstractTestBase {
     // Try to read parts of the table columns in a new streaming JOB.
     TableSchema wordColumn = TableSchema.builder().field("word", DataTypes.STRING()).build();
     String file = temp.newFile().toURI().toString();
-    IcebergSource.createSource(env, srcTableLocation, CONF,
+    IcebergSource.createSource(env, srcTableLocation, CONF, IcebergSource.NON_CONSUMED_SNAPSHOT_ID,
         1000L, 10L, wordColumn)
         .writeAsText(file);
     env.execute();

@@ -35,6 +35,7 @@ import org.apache.flink.table.sinks.StreamTableSink;
 import org.apache.flink.table.sources.StreamTableSource;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.flink.IcebergSource;
 
 /**
  * Factory for creating configured instances of {@link IcebergTableSink} or source.
@@ -64,8 +65,14 @@ public class IcebergTableFactory implements
     TableSchema schema = descProperties.getTableSchema(Schema.SCHEMA);
     // TODO consider to pass a configuration from user side.
     Configuration conf = new Configuration();
+    // Get the optional config keys.
+    long fromSnapshotId = descProperties.getOptionalLong(IcebergValidator.CONNECTOR_ICEBERG_TABLE_FROM_SNAPSHOT_ID)
+        .orElse(IcebergSource.NON_CONSUMED_SNAPSHOT_ID);
+    long snapshotPollingIntervalMillis = descProperties
+        .getOptionalLong(IcebergValidator.CONNECTOR_ICEBERG_TABLE_SNAP_POLLING_INTERVAL_MILLIS)
+        .orElse(1000L);
 
-    return new IcebergTableSource(tableIdentifier, conf, schema);
+    return new IcebergTableSource(tableIdentifier, conf, fromSnapshotId, snapshotPollingIntervalMillis, schema);
   }
 
   @Override
@@ -85,6 +92,8 @@ public class IcebergTableFactory implements
 
     // Iceberg properties
     properties.add(IcebergValidator.CONNECTOR_ICEBERG_TABLE_IDENTIFIER);
+    properties.add(IcebergValidator.CONNECTOR_ICEBERG_TABLE_FROM_SNAPSHOT_ID);
+    properties.add(IcebergValidator.CONNECTOR_ICEBERG_TABLE_SNAP_POLLING_INTERVAL_MILLIS);
 
     // Flink schema properties
     properties.add(Schema.SCHEMA + ".#." + Schema.SCHEMA_DATA_TYPE);
