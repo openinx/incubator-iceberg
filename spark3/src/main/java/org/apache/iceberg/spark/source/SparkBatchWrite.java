@@ -294,8 +294,7 @@ class SparkBatchWrite implements BatchWrite {
       this.close();
 
       List<DataFile> dataFiles = pollCompleteFiles();
-      TaskResult taskResult = new TaskResult(dataFiles);
-      return new TaskCommit(taskResult);
+      return new TaskCommit(new TaskResult(dataFiles));
     }
   }
 
@@ -312,8 +311,7 @@ class SparkBatchWrite implements BatchWrite {
       this.close();
 
       List<DataFile> dataFiles = pollCompleteFiles();
-      TaskResult taskResult = new TaskResult(dataFiles);
-      return new TaskCommit(taskResult);
+      return new TaskCommit(new TaskResult(dataFiles));
     }
   }
 }
