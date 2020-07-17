@@ -232,6 +232,7 @@ project(':iceberg-flink') {
     compile project(':iceberg-common')
     compile project(':iceberg-core')
     compile project(':iceberg-data')
+    compile project(':iceberg-hive')
     compile project(':iceberg-orc')
     compile project(':iceberg-parquet')
 

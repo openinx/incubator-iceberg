@@ -37,7 +37,6 @@ import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
-import org.apache.iceberg.taskio.OutputFileFactory;
 import org.apache.iceberg.taskio.TaskWriter;
 import org.junit.Assert;
 import org.junit.Before;
@@ -232,13 +231,9 @@ public class TestTaskWriters {
   }
 
   private TaskWriter<Row> createTaskWriter(long targetFileSize) {
-    TaskWriterFactory.FlinkFileAppenderFactory appenderFactory =
-        new TaskWriterFactory.FlinkFileAppenderFactory(table.schema(), table.properties());
+    TaskWriterFactory<Row> factory = new RowTaskWriterFactory(table.schema(), table.spec(),
+        table.locationProvider(), table.io(), table.encryption(), targetFileSize, format, table.properties());
 
-    OutputFileFactory outputFileFactory = new OutputFileFactory(table.spec(), format, table.locationProvider(),
-        table.io(), table.encryption(), 1, 1);
-
-    return TaskWriterFactory.createTaskWriter(table.schema(), table.spec(), format,
-        appenderFactory, outputFileFactory, table.io(), targetFileSize);
+    return factory.create(1, 1);
   }
 }

@@ -23,6 +23,8 @@ import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.TableSchema;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
@@ -46,6 +48,11 @@ public class SimpleDataUtil {
       Types.NestedField.optional(1, "id", Types.IntegerType.get()),
       Types.NestedField.optional(2, "data", Types.StringType.get())
   );
+
+  static final TableSchema FLINK_SCHEMA = TableSchema.builder()
+      .field("id", DataTypes.INT())
+      .field("data", DataTypes.STRING())
+      .build();
 
   static final Record RECORD = GenericRecord.create(SCHEMA);
 

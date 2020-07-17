@@ -19,10 +19,26 @@
 
 package org.apache.iceberg.flink;
 
-import java.io.Serializable;
-import org.apache.iceberg.taskio.TaskWriter;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.Table;
+import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.hive.HiveCatalog;
+import org.apache.iceberg.hive.HiveCatalogs;
 
-interface TaskWriterFactory<T> extends Serializable {
+class TableUtil {
 
-  TaskWriter<T> create(int taskId, long attemptId);
+  private TableUtil() {
+  }
+
+  static Table findTable(String path, Configuration conf) {
+    if (path.contains("/")) {
+      HadoopTables tables = new HadoopTables(conf);
+      return tables.load(path);
+    } else {
+      HiveCatalog hiveCatalog = HiveCatalogs.loadCatalog(conf);
+      TableIdentifier tableIdentifier = TableIdentifier.parse(path);
+      return hiveCatalog.loadTable(tableIdentifier);
+    }
+  }
 }

@@ -19,11 +19,12 @@
 
 package org.apache.iceberg.taskio;
 
+import java.io.Serializable;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.io.OutputFile;
 
-public interface FileAppenderFactory<T> {
+public interface FileAppenderFactory<T> extends Serializable {
 
   FileAppender<T> newAppender(OutputFile outputFile, FileFormat fileFormat);
 }
