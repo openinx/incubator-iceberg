@@ -35,13 +35,9 @@ import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.util.Tasks;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 abstract class BaseTaskWriter<T> implements TaskWriter<T> {
   protected static final int ROWS_DIVISOR = 1000;
-
-  private static final Logger LOG = LoggerFactory.getLogger(BaseTaskWriter.class);
 
   private final List<DataFile> completedFiles = Lists.newArrayList();
   private final PartitionSpec spec;
@@ -50,8 +46,6 @@ abstract class BaseTaskWriter<T> implements TaskWriter<T> {
   private final OutputFileFactory fileFactory;
   private final FileIO io;
   private final long targetFileSize;
-
-  private boolean closed = false;
 
   protected BaseTaskWriter(PartitionSpec spec, FileFormat format, FileAppenderFactory<T> appenderFactory,
                            OutputFileFactory fileFactory, FileIO io, long targetFileSize) {
@@ -65,7 +59,7 @@ abstract class BaseTaskWriter<T> implements TaskWriter<T> {
 
 
   @Override
-  public void abort() {
+  public void abort() throws IOException {
     close();
 
     // clean up files created by this writer
@@ -77,9 +71,6 @@ abstract class BaseTaskWriter<T> implements TaskWriter<T> {
 
   @Override
   public final void write(T record) throws IOException {
-    if (closed) {
-      throw new IOException("The writer has been closed.");
-    }
     internalWrite(record);
   }
 
@@ -97,16 +88,8 @@ abstract class BaseTaskWriter<T> implements TaskWriter<T> {
   }
 
   @Override
-  public final void close() {
-    if (!this.closed) {
-      try {
-        internalClose();
-      } catch (IOException e) {
-        LOG.warn("Failed to close the writer: ", e);
-      } finally {
-        this.closed = true;
-      }
-    }
+  public final void close() throws IOException {
+    internalClose();
   }
 
   protected abstract void internalClose() throws IOException;
