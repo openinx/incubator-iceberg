@@ -23,14 +23,25 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.util.FiniteTestSource;
 import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.util.DataFormatConverters;
+import org.apache.flink.table.runtime.typeutils.RowDataTypeInfo;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
+import org.apache.iceberg.FileFormat;
+import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
@@ -46,28 +57,32 @@ import static org.apache.flink.table.api.Expressions.$;
 
 @RunWith(Parameterized.class)
 public class TestFlinkTableSink extends AbstractTestBase {
+  private static final DataFormatConverters.RowConverter CONVERTER = new DataFormatConverters.RowConverter(
+      SimpleDataUtil.FLINK_SCHEMA.getFieldDataTypes());
 
-  private static final String TABLE_NAME = "destinationTable";
+  private static final String TABLE_NAME = "flink_table";
 
   @Rule
   public TemporaryFolder tempFolder = new TemporaryFolder();
   private String warehouse;
   private String tablePath;
 
+  private final FileFormat format;
   private final boolean useOldPlanner;
   private final int parallelism;
 
   @Parameterized.Parameters(name = "{index}: useOldPlanner={0}, parallelism={1}")
   public static Iterable<Object[]> data() {
     return Arrays.asList(
-        new Object[] {true, 1},
-        new Object[] {false, 1},
-        new Object[] {true, 2},
-        new Object[] {false, 2}
+        new Object[] {"avro", true, 1},
+        new Object[] {"avro", false, 1},
+        new Object[] {"avro", true, 2},
+        new Object[] {"avro", false, 2}
     );
   }
 
-  public TestFlinkTableSink(boolean useOldPlanner, int parallelism) {
+  public TestFlinkTableSink(String format, boolean useOldPlanner, int parallelism) {
+    this.format = FileFormat.valueOf(format.toUpperCase(Locale.ENGLISH));
     this.useOldPlanner = useOldPlanner;
     this.parallelism = parallelism;
   }
@@ -77,10 +92,11 @@ public class TestFlinkTableSink extends AbstractTestBase {
     File folder = tempFolder.newFolder();
     warehouse = folder.getAbsolutePath();
 
-    tablePath = warehouse.concat(TABLE_NAME);
+    tablePath = warehouse.concat("/").concat(TABLE_NAME);
     Assert.assertTrue("Should create the table path correctly.", new File(tablePath).mkdir());
 
-    SimpleDataUtil.createTable(tablePath, ImmutableMap.of(), true);
+    Map<String, String> props = ImmutableMap.of(TableProperties.DEFAULT_FILE_FORMAT, format.name());
+    SimpleDataUtil.createTable(tablePath, props, true);
   }
 
   @Test
@@ -102,38 +118,52 @@ public class TestFlinkTableSink extends AbstractTestBase {
     for (int i = 0; i < worlds.length; i++) {
       rows.add(Row.of(i + 1, worlds[i]));
     }
-    DataStream<Row> dataStream = env.addSource(new FiniteTestSource<>(rows), SimpleDataUtil.FLINK_SCHEMA.toRowType());
+    TypeInformation<Row> typeInformation = new RowTypeInfo(SimpleDataUtil.FLINK_SCHEMA.getFieldTypes());
+    DataStream<RowData> stream = env.addSource(new FiniteTestSource<>(rows), typeInformation)
+        .map(CONVERTER::toInternal, RowDataTypeInfo.of(SimpleDataUtil.ROW_TYPE));
 
     // Register the rows into a temporary table named 'sourceTable'.
-    tEnv.createTemporaryView("sourceTable", tEnv.fromDataStream(dataStream, $("id"), $("data")));
+    tEnv.createTemporaryView("sourceTable", tEnv.fromDataStream(stream, $("id"), $("data")));
 
-    // Create another table named 'destinationTable'
-    String ddl = String.format("CREATE TABLE %s(" +
+    // Create another table by using flink SQL.
+    String ddl = String.format("CREATE TABLE default_database.%s(" +
             "id   int, " +
             "data string) " +
             "WITH (" +
             "'connector.type'='iceberg', " +
             "'connector.version'='1.10.0', " +
-            "'connector.iceberg-table.name'='%s', " +
+            "'connector.iceberg.catalog-name'='default_catalog', " +
+            "'connector.iceberg.table-name'='%s', " +
             "'connector.iceberg.catalog-type'='hadoop', " +
             "'connector.iceberg.hadoop-warehouse'='file://%s')",
         TABLE_NAME, TABLE_NAME, warehouse);
-    tEnv.executeSql(ddl);
+    TableResult result = tEnv.executeSql(ddl);
+    waitComplete(result);
 
     // Redirect the records from 'words' table to 'destinationTable'
-    tEnv.executeSql("INSERT INTO destinationTable SELECT id,data from sourceTable");
-
-    // Submit the flink job.
-    env.execute();
+    String insertSQL = String.format("INSERT INTO default_catalog.default_database.%s SELECT id,data from sourceTable",
+        TABLE_NAME);
+    result = tEnv.executeSql(insertSQL);
+    waitComplete(result);
 
     // Assert the table records as expected.
     List<Record> expected = Lists.newArrayList();
     // There will be two checkpoints in FiniteTestSource, so it will produce a list with double records.
     for (int i = 0; i < 2; i++) {
       for (int k = 0; k < worlds.length; k++) {
-        expected.add(SimpleDataUtil.createRecord(k + 1, "word"));
+        expected.add(SimpleDataUtil.createRecord(k + 1, worlds[k]));
       }
     }
     SimpleDataUtil.assertTableRecords(tablePath, expected);
+  }
+
+  private static void waitComplete(TableResult result) {
+    result.getJobClient().ifPresent(jobClient -> {
+      try {
+        jobClient.getJobExecutionResult(Thread.currentThread().getContextClassLoader()).get();
+      } catch (InterruptedException | ExecutionException e) {
+        throw new RuntimeException(e);
+      }
+    });
   }
 }

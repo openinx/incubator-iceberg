@@ -40,11 +40,13 @@ public class IcebergTableFactory implements StreamTableSinkFactory<RowData> {
     DescriptorProperties descProperties = getValidatedProperties(properties);
 
     // Create the IcebergTableSink instance.
+    String catalogName = descProperties.getString(IcebergValidator.CONNECTOR_ICEBERG_CATALOG_NAME);
     String fullTableName = descProperties.getString(IcebergValidator.CONNECTOR_ICEBERG_TABLE_NAME);
     TableSchema schema = descProperties.getTableSchema(Schema.SCHEMA);
     Configuration conf = IcebergValidator.getConfiguration(descProperties);
     Map<String, String> options = IcebergValidator.getOptions(descProperties);
-    return new IcebergTableSink(fullTableName, schema, conf, options);
+
+    return new IcebergTableSink(catalogName, fullTableName, schema, conf, options);
   }
 
   @Override
@@ -63,7 +65,9 @@ public class IcebergTableFactory implements StreamTableSinkFactory<RowData> {
     properties.add(StreamTableDescriptorValidator.UPDATE_MODE);
 
     // Iceberg properties
+    properties.add(IcebergValidator.CONNECTOR_ICEBERG_CATALOG_NAME);
     properties.add(IcebergValidator.CONNECTOR_ICEBERG_TABLE_NAME);
+
     properties.add(IcebergValidator.CONNECTOR_ICEBERG_CONFIGURATION_PATH);
     properties.add(IcebergValidator.CONNECTOR_ICEBERG_CATALOG_TYPE);
     properties.add(IcebergValidator.CONNECTOR_ICEBERG_HIVE_URI);

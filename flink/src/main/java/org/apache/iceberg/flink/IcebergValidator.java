@@ -42,8 +42,9 @@ class IcebergValidator extends ConnectorDescriptorValidator {
   public static final String CONNECTOR_PROPERTY_VERSION = "connector.property-version";
   public static final int CONNECTOR_PROPERTY_VERSION_VALUE = 1;
 
-  public static final String CONNECTOR_ICEBERG_TABLE_NAME = "connector.iceberg-table.name";
-  public static final String CONNECTOR_ICEBERG_CONFIGURATION_PATH = "connector.iceberg-configuration.path";
+  public static final String CONNECTOR_ICEBERG_CATALOG_NAME = "connector.iceberg.catalog-name";
+  public static final String CONNECTOR_ICEBERG_TABLE_NAME = "connector.iceberg.table-name";
+  public static final String CONNECTOR_ICEBERG_CONFIGURATION_PATH = "connector.iceberg.config-path";
 
   public static final String CONNECTOR_ICEBERG_CATALOG_TYPE = "connector.iceberg.catalog-type";
   public static final String CONNECTOR_ICEBERG_HIVE_URI = "connector.iceberg.hive-uri";
@@ -58,8 +59,9 @@ class IcebergValidator extends ConnectorDescriptorValidator {
   public void validate(DescriptorProperties properties) {
     super.validate(properties);
     properties.validateValue(CONNECTOR_TYPE, CONNECTOR_TYPE_VALUE, false);
+    properties.validateString(CONNECTOR_ICEBERG_CATALOG_NAME, false, 1);
     properties.validateString(CONNECTOR_ICEBERG_TABLE_NAME, false, 1);
-    properties.validateString(CONNECTOR_ICEBERG_CATALOG_TYPE, false);
+    properties.validateString(CONNECTOR_ICEBERG_CATALOG_TYPE, false, 1);
   }
 
   static IcebergValidator getInstance() {

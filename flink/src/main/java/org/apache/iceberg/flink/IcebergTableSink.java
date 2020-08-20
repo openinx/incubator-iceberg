@@ -37,14 +37,16 @@ import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 
 public class IcebergTableSink implements AppendStreamTableSink<RowData> {
+  private final String catalogName;
   private final String fullTableName;
   private final TableSchema tableSchema;
   private final Configuration conf;
   private final Map<String, String> options;
   private final FlinkCatalogFactory catalogFactory;
 
-  public IcebergTableSink(String fullTableName, TableSchema tableSchema,
+  public IcebergTableSink(String catalogName, String fullTableName, TableSchema tableSchema,
                           Configuration conf, Map<String, String> options) {
+    this.catalogName = catalogName;
     this.fullTableName = fullTableName;
     this.tableSchema = tableSchema;
     this.conf = conf;
@@ -56,12 +58,21 @@ public class IcebergTableSink implements AppendStreamTableSink<RowData> {
   public DataStreamSink<?> consumeDataStream(DataStream<RowData> dataStream) {
     Catalog catalog = catalogFactory.buildIcebergCatalog(fullTableName, options, conf);
     Table table = catalog.loadTable(TableIdentifier.parse(fullTableName));
-    return IcebergSinkUtil.write(dataStream, -1, options, conf, fullTableName, table, tableSchema);
+
+    return IcebergSinkUtil.builder()
+        .inputStream(dataStream)
+        .config(conf)
+        .setAll(options)
+        .catalogName(catalogName)
+        .fullTableName(fullTableName)
+        .table(table)
+        .flinkSchema(tableSchema)
+        .build();
   }
 
   @Override
   public DataType getConsumedDataType() {
-    return tableSchema.toRowDataType();
+    return tableSchema.toRowDataType().bridgedTo(RowData.class);
   }
 
   @Override
