@@ -20,7 +20,6 @@
 package org.apache.iceberg.flink;
 
 import java.util.Arrays;
-import java.util.Map;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -32,41 +31,32 @@ import org.apache.flink.table.sinks.TableSink;
 import org.apache.flink.table.types.DataType;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Table;
-import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.TableIdentifier;
-import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 
 public class IcebergTableSink implements AppendStreamTableSink<RowData> {
-  private final String catalogName;
-  private final String fullTableName;
+  private final TableIdentifier tableIdentifier;
+  private final Table table;
+  private final CatalogLoader catalogLoader;
   private final TableSchema tableSchema;
-  private final Configuration conf;
-  private final Map<String, String> options;
-  private final FlinkCatalogFactory catalogFactory;
+  private final Configuration hadoopConf;
 
-  public IcebergTableSink(String catalogName, String fullTableName, TableSchema tableSchema,
-                          Configuration conf, Map<String, String> options) {
-    this.catalogName = catalogName;
-    this.fullTableName = fullTableName;
+  public IcebergTableSink(TableIdentifier tableIdentifier, Table table,
+                          CatalogLoader catalogLoader, Configuration hadoopConf,
+                          TableSchema tableSchema) {
+    this.tableIdentifier = tableIdentifier;
+    this.table = table;
+    this.catalogLoader = catalogLoader;
+    this.hadoopConf = hadoopConf;
     this.tableSchema = tableSchema;
-    this.conf = conf;
-    this.options = ImmutableMap.copyOf(options);
-    this.catalogFactory = new FlinkCatalogFactory();
   }
 
   @Override
   public DataStreamSink<?> consumeDataStream(DataStream<RowData> dataStream) {
-    Catalog catalog = catalogFactory.buildIcebergCatalog(fullTableName, options, conf);
-    Table table = catalog.loadTable(TableIdentifier.parse(fullTableName));
-
-    return IcebergSinkUtil.builder()
-        .inputStream(dataStream)
-        .config(conf)
-        .setAll(options)
-        .catalogName(catalogName)
-        .fullTableName(fullTableName)
+    return FlinkSink.forRowData(dataStream)
         .table(table)
-        .flinkSchema(tableSchema)
+        .tableLoader(TableLoader.fromCatalog(catalogLoader, tableIdentifier))
+        .hadoopConf(hadoopConf)
+        .tableSchema(tableSchema)
         .build();
   }
 

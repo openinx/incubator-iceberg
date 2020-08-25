@@ -21,7 +21,10 @@ package org.apache.iceberg.flink;
 
 import java.util.List;
 import java.util.Map;
-import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.descriptors.ConnectorDescriptorValidator;
 import org.apache.flink.table.descriptors.DescriptorProperties;
@@ -29,24 +32,31 @@ import org.apache.flink.table.descriptors.Schema;
 import org.apache.flink.table.descriptors.StreamTableDescriptorValidator;
 import org.apache.flink.table.factories.StreamTableSinkFactory;
 import org.apache.flink.table.sinks.StreamTableSink;
-import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.Table;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 
 public class IcebergTableFactory implements StreamTableSinkFactory<RowData> {
+  private final FlinkCatalog catalog;
+
+  public IcebergTableFactory(FlinkCatalog catalog) {
+    this.catalog = catalog;
+  }
 
   @Override
-  public StreamTableSink<RowData> createTableSink(Map<String, String> properties) {
-    DescriptorProperties descProperties = getValidatedProperties(properties);
-
-    // Create the IcebergTableSink instance.
-    String catalogName = descProperties.getString(IcebergValidator.CONNECTOR_ICEBERG_CATALOG_NAME);
-    String fullTableName = descProperties.getString(IcebergValidator.CONNECTOR_ICEBERG_TABLE_NAME);
-    TableSchema schema = descProperties.getTableSchema(Schema.SCHEMA);
-    Configuration conf = IcebergValidator.getConfiguration(descProperties);
-    Map<String, String> options = IcebergValidator.getOptions(descProperties);
-
-    return new IcebergTableSink(catalogName, fullTableName, schema, conf, options);
+  public StreamTableSink<RowData> createTableSink(Context context) {
+    ObjectIdentifier identifier = context.getObjectIdentifier();
+    ObjectPath objectPath = new ObjectPath(identifier.getDatabaseName(), identifier.getObjectName());
+    TableIdentifier icebergIdentifier = catalog.toIdentifier(objectPath);
+    try {
+      Table table = catalog.getIcebergTable(objectPath);
+      return new IcebergTableSink(icebergIdentifier, table,
+          catalog.getCatalogLoader(), catalog.getHadoopConf(),
+          FlinkSchemaUtil.toSchema(table.schema()));
+    } catch (TableNotExistException e) {
+      throw new ValidationException(String.format("Iceberg table(%s) not exist.", icebergIdentifier), e);
+    }
   }
 
   @Override
@@ -64,18 +74,6 @@ public class IcebergTableFactory implements StreamTableSinkFactory<RowData> {
     // update mode
     properties.add(StreamTableDescriptorValidator.UPDATE_MODE);
 
-    // Iceberg properties
-    properties.add(IcebergValidator.CONNECTOR_ICEBERG_CATALOG_NAME);
-    properties.add(IcebergValidator.CONNECTOR_ICEBERG_TABLE_NAME);
-
-    properties.add(IcebergValidator.CONNECTOR_ICEBERG_CONFIGURATION_PATH);
-    properties.add(IcebergValidator.CONNECTOR_ICEBERG_CATALOG_TYPE);
-    properties.add(IcebergValidator.CONNECTOR_ICEBERG_HIVE_URI);
-    properties.add(IcebergValidator.CONNECTOR_ICEBERG_HIVE_CLIENT_POOL_SIZE);
-    properties.add(IcebergValidator.CONNECTOR_ICEBERG_HADOOP_WAREHOUSE);
-    properties.add(IcebergValidator.CONNECTOR_ICEBERG_DEFAULT_DATABASE);
-    properties.add(IcebergValidator.CONNECTOR_ICEBERG_BASE_NAMESPACE);
-
     // Flink schema properties
     properties.add(Schema.SCHEMA + ".#." + Schema.SCHEMA_DATA_TYPE);
     properties.add(Schema.SCHEMA + ".#." + Schema.SCHEMA_NAME);
@@ -89,13 +87,5 @@ public class IcebergTableFactory implements StreamTableSinkFactory<RowData> {
     properties.add(Schema.SCHEMA + "." + DescriptorProperties.WATERMARK +
         ".#." + DescriptorProperties.WATERMARK_STRATEGY_DATA_TYPE);
     return properties;
-  }
-
-  private static DescriptorProperties getValidatedProperties(Map<String, String> properties) {
-    DescriptorProperties descProperties = new DescriptorProperties(true);
-    descProperties.putProperties(properties);
-    // Validate the properties values.
-    IcebergValidator.getInstance().validate(descProperties);
-    return descProperties;
   }
 }

@@ -63,9 +63,6 @@ public class TestIcebergTableFactory {
     tableProperties.put(IcebergValidator.CONNECTOR_VERSION, IcebergValidator.CONNECTOR_VERSION_VALUE);
     tableProperties.put(IcebergValidator.CONNECTOR_PROPERTY_VERSION,
         String.valueOf(IcebergValidator.CONNECTOR_PROPERTY_VERSION_VALUE));
-    tableProperties.put(IcebergValidator.CONNECTOR_ICEBERG_CATALOG_NAME, "prod");
-    tableProperties.put(IcebergValidator.CONNECTOR_ICEBERG_TABLE_NAME, location);
-    tableProperties.put(IcebergValidator.CONNECTOR_ICEBERG_CATALOG_TYPE, "hadoop");
 
     DescriptorProperties descriptorProperties = new DescriptorProperties(true);
     descriptorProperties.putTableSchema(Schema.SCHEMA, tableSchema);
@@ -112,7 +109,6 @@ public class TestIcebergTableFactory {
         .build();
 
     DescriptorProperties descriptorProperties = createDescriptor(schema, tableLocation);
-    descriptorProperties.putString(IcebergValidator.CONNECTOR_ICEBERG_CONFIGURATION_PATH, "file:///tmp/");
     TableSink sink = TableFactoryService
         .find(IcebergTableFactory.class, descriptorProperties.asMap(), this.getClass().getClassLoader())
         .createTableSink(descriptorProperties.asMap());

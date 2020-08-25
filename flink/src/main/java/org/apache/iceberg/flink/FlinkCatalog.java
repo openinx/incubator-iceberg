@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.flink.table.api.TableSchema;
@@ -46,6 +47,7 @@ import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
+import org.apache.flink.table.factories.TableFactory;
 import org.apache.flink.util.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.CachingCatalog;
@@ -119,7 +121,7 @@ public class FlinkCatalog extends AbstractCatalog {
     return Namespace.of(namespace);
   }
 
-  private TableIdentifier toIdentifier(ObjectPath path) {
+  public TableIdentifier toIdentifier(ObjectPath path) {
     return TableIdentifier.of(toNamespace(path.getDatabaseName()), path.getObjectName());
   }
 
@@ -279,13 +281,21 @@ public class FlinkCatalog extends AbstractCatalog {
   @Override
   public CatalogBaseTable getTable(ObjectPath tablePath) throws TableNotExistException, CatalogException {
     try {
-      Table table = icebergCatalog.loadTable(toIdentifier(tablePath));
+      Table table = getIcebergTable(tablePath);
       TableSchema tableSchema = FlinkSchemaUtil.toSchema(FlinkSchemaUtil.convert(table.schema()));
 
       // NOTE: We can not create a IcebergCatalogTable, because Flink optimizer may use CatalogTableImpl to copy a new
       // catalog table.
       // Let's re-loading table from Iceberg catalog when creating source/sink operators.
       return new CatalogTableImpl(tableSchema, table.properties(), null);
+    } catch (org.apache.iceberg.exceptions.NoSuchTableException e) {
+      throw new TableNotExistException(getName(), tablePath, e);
+    }
+  }
+
+  Table getIcebergTable(ObjectPath tablePath) throws TableNotExistException {
+    try {
+      return icebergCatalog.loadTable(toIdentifier(tablePath));
     } catch (org.apache.iceberg.exceptions.NoSuchTableException e) {
       throw new TableNotExistException(getName(), tablePath, e);
     }
@@ -335,6 +345,19 @@ public class FlinkCatalog extends AbstractCatalog {
     throw new UnsupportedOperationException("Not support alterTable now.");
   }
 
+  @Override
+  public Optional<TableFactory> getTableFactory() {
+    return Optional.of(new IcebergTableFactory(this));
+  }
+
+  CatalogLoader getCatalogLoader() {
+    return catalogLoader;
+  }
+
+  Configuration getHadoopConf() {
+    return this.hadoopConf;
+  }
+
   // ------------------------------ Unsupported methods ---------------------------------------------
 
   @Override
@@ -355,7 +378,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
   @Override
   public void createPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec, CatalogPartition partition,
-      boolean ignoreIfExists) throws CatalogException {
+                              boolean ignoreIfExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
@@ -367,7 +390,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
   @Override
   public void alterPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec, CatalogPartition newPartition,
-      boolean ignoreIfNotExists) throws CatalogException {
+                             boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
@@ -406,25 +429,27 @@ public class FlinkCatalog extends AbstractCatalog {
 
   @Override
   public void alterTableStatistics(ObjectPath tablePath, CatalogTableStatistics tableStatistics,
-      boolean ignoreIfNotExists) throws CatalogException {
+                                   boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
   public void alterTableColumnStatistics(ObjectPath tablePath, CatalogColumnStatistics columnStatistics,
-      boolean ignoreIfNotExists) throws CatalogException {
+                                         boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
   public void alterPartitionStatistics(ObjectPath tablePath, CatalogPartitionSpec partitionSpec,
-      CatalogTableStatistics partitionStatistics, boolean ignoreIfNotExists) throws CatalogException {
+                                       CatalogTableStatistics partitionStatistics, boolean ignoreIfNotExists)
+      throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
   public void alterPartitionColumnStatistics(ObjectPath tablePath, CatalogPartitionSpec partitionSpec,
-      CatalogColumnStatistics columnStatistics, boolean ignoreIfNotExists) throws CatalogException {
+                                             CatalogColumnStatistics columnStatistics, boolean ignoreIfNotExists)
+      throws CatalogException {
     throw new UnsupportedOperationException();
   }
 

@@ -35,14 +35,19 @@ import org.apache.flink.streaming.util.FiniteTestSource;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.DataFormatConverters;
 import org.apache.flink.table.runtime.typeutils.RowDataTypeInfo;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileFormat;
+import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.TableProperties;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.Record;
+import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.junit.Assert;
@@ -57,6 +62,7 @@ import static org.apache.flink.table.api.Expressions.$;
 
 @RunWith(Parameterized.class)
 public class TestFlinkTableSink extends AbstractTestBase {
+  private static final Configuration CONF = new Configuration();
   private static final DataFormatConverters.RowConverter CONVERTER = new DataFormatConverters.RowConverter(
       SimpleDataUtil.FLINK_SCHEMA.getFieldDataTypes());
 
@@ -66,12 +72,13 @@ public class TestFlinkTableSink extends AbstractTestBase {
   public TemporaryFolder tempFolder = new TemporaryFolder();
   private String warehouse;
   private String tablePath;
+  private Runnable catalogTableCreator;
 
   private final FileFormat format;
   private final boolean useOldPlanner;
   private final int parallelism;
 
-  @Parameterized.Parameters(name = "{index}: useOldPlanner={0}, parallelism={1}")
+  @Parameterized.Parameters(name = "{index}: format={0}, useOldPlanner={1}, parallelism={2}")
   public static Iterable<Object[]> data() {
     return Arrays.asList(
         new Object[] {"avro", true, 1},
@@ -92,11 +99,16 @@ public class TestFlinkTableSink extends AbstractTestBase {
     File folder = tempFolder.newFolder();
     warehouse = folder.getAbsolutePath();
 
-    tablePath = warehouse.concat("/").concat(TABLE_NAME);
-    Assert.assertTrue("Should create the table path correctly.", new File(tablePath).mkdir());
+    tablePath = warehouse.concat("/default/").concat(TABLE_NAME);
+    Assert.assertTrue("Should create the table path correctly.", new File(tablePath).mkdirs());
 
     Map<String, String> props = ImmutableMap.of(TableProperties.DEFAULT_FILE_FORMAT, format.name());
-    SimpleDataUtil.createTable(tablePath, props, true);
+    HadoopCatalog catalog = new HadoopCatalog(CONF, warehouse);
+    catalogTableCreator = () -> catalog
+        .createTable(TableIdentifier.parse("default." + TABLE_NAME),
+            SimpleDataUtil.SCHEMA,
+            PartitionSpec.unpartitioned(),
+            props);
   }
 
   @Test
@@ -112,6 +124,13 @@ public class TestFlinkTableSink extends AbstractTestBase {
       settingsBuilder.useBlinkPlanner();
     }
     StreamTableEnvironment tEnv = StreamTableEnvironment.create(env, settingsBuilder.build());
+    tEnv.executeSql(String.format("create catalog iceberg_catalog with (" +
+        "'type'='iceberg', 'catalog-type'='hadoop', 'warehouse'='%s')", warehouse));
+    tEnv.executeSql("use catalog iceberg_catalog");
+    tEnv.getConfig().getConfiguration().set(TableConfigOptions.TABLE_DYNAMIC_TABLE_OPTIONS_ENABLED, true);
+
+    // Create the table.
+    catalogTableCreator.run();
 
     String[] worlds = new String[] {"hello", "world", "foo", "bar", "apache", "foundation"};
     List<Row> rows = Lists.newArrayList();
@@ -125,25 +144,10 @@ public class TestFlinkTableSink extends AbstractTestBase {
     // Register the rows into a temporary table named 'sourceTable'.
     tEnv.createTemporaryView("sourceTable", tEnv.fromDataStream(stream, $("id"), $("data")));
 
-    // Create another table by using flink SQL.
-    String ddl = String.format("CREATE TABLE default_database.%s(" +
-            "id   int, " +
-            "data string) " +
-            "WITH (" +
-            "'connector.type'='iceberg', " +
-            "'connector.version'='1.10.0', " +
-            "'connector.iceberg.catalog-name'='default_catalog', " +
-            "'connector.iceberg.table-name'='%s', " +
-            "'connector.iceberg.catalog-type'='hadoop', " +
-            "'connector.iceberg.hadoop-warehouse'='file://%s')",
-        TABLE_NAME, TABLE_NAME, warehouse);
-    TableResult result = tEnv.executeSql(ddl);
-    waitComplete(result);
-
-    // Redirect the records from 'words' table to 'destinationTable'
-    String insertSQL = String.format("INSERT INTO default_catalog.default_database.%s SELECT id,data from sourceTable",
+    // Redirect the records from source table to destination table.
+    String insertSQL = String.format("INSERT INTO %s SELECT id,data from sourceTable",
         TABLE_NAME);
-    result = tEnv.executeSql(insertSQL);
+    TableResult result = tEnv.executeSql(insertSQL);
     waitComplete(result);
 
     // Assert the table records as expected.
