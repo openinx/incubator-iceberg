@@ -347,7 +347,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
   @Override
   public Optional<TableFactory> getTableFactory() {
-    return Optional.of(new IcebergTableFactory(this));
+    return Optional.of(new FlinkTableFactory(this));
   }
 
   CatalogLoader getCatalogLoader() {

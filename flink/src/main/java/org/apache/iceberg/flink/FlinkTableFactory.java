@@ -26,21 +26,15 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.descriptors.ConnectorDescriptorValidator;
-import org.apache.flink.table.descriptors.DescriptorProperties;
-import org.apache.flink.table.descriptors.Schema;
-import org.apache.flink.table.descriptors.StreamTableDescriptorValidator;
 import org.apache.flink.table.factories.StreamTableSinkFactory;
 import org.apache.flink.table.sinks.StreamTableSink;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.TableIdentifier;
-import org.apache.iceberg.relocated.com.google.common.collect.Lists;
-import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 
-public class IcebergTableFactory implements StreamTableSinkFactory<RowData> {
+public class FlinkTableFactory implements StreamTableSinkFactory<RowData> {
   private final FlinkCatalog catalog;
 
-  public IcebergTableFactory(FlinkCatalog catalog) {
+  public FlinkTableFactory(FlinkCatalog catalog) {
     this.catalog = catalog;
   }
 
@@ -61,31 +55,11 @@ public class IcebergTableFactory implements StreamTableSinkFactory<RowData> {
 
   @Override
   public Map<String, String> requiredContext() {
-    Map<String, String> context = Maps.newHashMap();
-    context.put(ConnectorDescriptorValidator.CONNECTOR_TYPE, IcebergValidator.CONNECTOR_TYPE_VALUE);
-    context.put(ConnectorDescriptorValidator.CONNECTOR_VERSION, IcebergValidator.CONNECTOR_VERSION_VALUE);
-    context.put(ConnectorDescriptorValidator.CONNECTOR_PROPERTY_VERSION, "1");
-    return context;
+    throw new UnsupportedOperationException("Iceberg Table Factory can not be loaded from Java SPI");
   }
 
   @Override
   public List<String> supportedProperties() {
-    List<String> properties = Lists.newArrayList();
-    // update mode
-    properties.add(StreamTableDescriptorValidator.UPDATE_MODE);
-
-    // Flink schema properties
-    properties.add(Schema.SCHEMA + ".#." + Schema.SCHEMA_DATA_TYPE);
-    properties.add(Schema.SCHEMA + ".#." + Schema.SCHEMA_NAME);
-    properties.add(Schema.SCHEMA + ".#." + Schema.SCHEMA_FROM);
-
-    // watermark
-    properties.add(Schema.SCHEMA + "." + DescriptorProperties.WATERMARK +
-        ".#." + DescriptorProperties.WATERMARK_ROWTIME);
-    properties.add(Schema.SCHEMA + "." + DescriptorProperties.WATERMARK +
-        ".#." + DescriptorProperties.WATERMARK_STRATEGY_EXPR);
-    properties.add(Schema.SCHEMA + "." + DescriptorProperties.WATERMARK +
-        ".#." + DescriptorProperties.WATERMARK_STRATEGY_DATA_TYPE);
-    return properties;
+    throw new UnsupportedOperationException("Iceberg Table Factory can not be loaded from Java SPI");
   }
 }
