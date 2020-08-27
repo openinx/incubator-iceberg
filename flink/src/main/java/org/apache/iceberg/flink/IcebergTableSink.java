@@ -32,6 +32,7 @@ import org.apache.flink.table.types.DataType;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.flink.sink.FlinkSink;
 
 public class IcebergTableSink implements AppendStreamTableSink<RowData> {
   private final TableIdentifier tableIdentifier;
