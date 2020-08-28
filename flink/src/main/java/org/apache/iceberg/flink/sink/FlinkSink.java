@@ -21,6 +21,7 @@ package org.apache.iceberg.flink.sink;
 
 import java.util.Locale;
 import java.util.Map;
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -28,10 +29,9 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.util.DataFormatConverters;
-import org.apache.flink.table.runtime.typeutils.RowDataTypeInfo;
+import org.apache.flink.table.data.conversion.DataStructureConverter;
+import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.types.Row;
@@ -105,22 +105,18 @@ public class FlinkSink {
       return this;
     }
 
+    @SuppressWarnings("unchecked")
     private DataStream<RowData> convert() {
       Preconditions.checkArgument(rowInput != null, "The DataStream<Row> to convert shouldn't be null");
 
-      RowType rowType;
-      DataType[] fieldDataTypes;
+      DataType type;
       if (tableSchema != null) {
-        rowType = (RowType) tableSchema.toRowDataType().getLogicalType();
-        fieldDataTypes = tableSchema.getFieldDataTypes();
+        type = tableSchema.toRowDataType();
       } else {
-        rowType = FlinkSchemaUtil.convert(table.schema());
-        fieldDataTypes = TypeConversions.fromLogicalToDataType(rowType.getChildren().toArray(new LogicalType[0]));
+        type = TypeConversions.fromLogicalToDataType(FlinkSchemaUtil.convert(table.schema()));
       }
-
-      DataFormatConverters.RowConverter rowConverter = new DataFormatConverters.RowConverter(fieldDataTypes);
-
-      return rowInput.map(rowConverter::toInternal, RowDataTypeInfo.of(rowType));
+      DataStructureConverter converter = DataStructureConverters.getConverter(type);
+      return rowInput.map((MapFunction) converter::toInternal);
     }
 
     @SuppressWarnings("unchecked")
