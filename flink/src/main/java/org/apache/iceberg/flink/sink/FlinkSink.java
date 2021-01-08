@@ -36,6 +36,7 @@ import org.apache.flink.table.data.util.DataFormatConverters;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.Row;
+import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DistributionMode;
 import org.apache.iceberg.FileFormat;
@@ -45,6 +46,7 @@ import org.apache.iceberg.Table;
 import org.apache.iceberg.flink.FlinkSchemaUtil;
 import org.apache.iceberg.flink.TableLoader;
 import org.apache.iceberg.flink.util.FlinkCompatibilityUtil;
+import org.apache.iceberg.flink.source.RewriteMapFunction;
 import org.apache.iceberg.io.WriteResult;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
@@ -57,6 +59,7 @@ import static org.apache.iceberg.TableProperties.DEFAULT_FILE_FORMAT;
 import static org.apache.iceberg.TableProperties.DEFAULT_FILE_FORMAT_DEFAULT;
 import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE;
 import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE_DEFAULT;
+import static org.apache.iceberg.TableProperties.DEFAULT_NAME_MAPPING;
 import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES;
 import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES_DEFAULT;
 
@@ -123,6 +126,7 @@ public class FlinkSink {
     private boolean overwrite = false;
     private DistributionMode distributionMode = null;
     private Integer writeParallelism = null;
+    private boolean autoCompact = false;
     private List<String> equalityFieldColumns = null;
 
     private Builder() {
@@ -195,6 +199,17 @@ public class FlinkSink {
     }
 
     /**
+     * Enable to compact small files automatically in flink streaming job.
+     *
+     * @param enable to compact small files automatically in flink streaming job.
+     * @return {@link Builder} to connect the iceberg table.
+     */
+    public Builder autoCompact(boolean enable) {
+      this.autoCompact = enable;
+      return this;
+    }
+
+    /**
      * Configuring the equality field columns for iceberg table that accept CDC or UPSERT events.
      *
      * @param columns defines the iceberg table's key.
@@ -250,7 +265,32 @@ public class FlinkSink {
           .setParallelism(1)
           .setMaxParallelism(1);
 
-      return returnStream.addSink(new DiscardingSink())
+      DataStream<?> stream = returnStream;
+      if (autoCompact) {
+        // Should disable the auto-compact for format v2 or passing non-null equality delete field ids now. TODO
+        SplitsSelector splitsSelector = new SplitsSelector(tableLoader, 64 * 1024 * 1024);
+
+        RewriteMapFunction rewriteMapFunction = new RewriteMapFunction(
+            table.schema(),
+            PropertyUtil.propertyAsString(table.properties(), DEFAULT_NAME_MAPPING, null),
+            table.io(),
+            false,
+            table.encryption(),
+            createTaskWriterFactory(table, flinkRowType, null)
+        );
+
+        stream = returnStream
+            .transform("SmallFilesSelector", TypeInformation.of(CombinedScanTask.class), splitsSelector)
+            .setParallelism(1)
+            .setMaxParallelism(1)
+            .map(rewriteMapFunction)
+            .setParallelism(writeParallelism)
+            .transform("Iceberg-Rewrite-Files-Committer", Types.VOID, filesCommitter)
+            .setParallelism(1)
+            .setMaxParallelism(1);
+      }
+
+      return stream.addSink(new DiscardingSink())
           .name(String.format("IcebergSink %s", table.name()))
           .setParallelism(1);
     }
@@ -310,17 +350,22 @@ public class FlinkSink {
     }
   }
 
-  static IcebergStreamWriter<RowData> createStreamWriter(Table table,
-                                                         RowType flinkRowType,
-                                                         List<Integer> equalityFieldIds) {
+  static TaskWriterFactory<RowData> createTaskWriterFactory(Table table,
+                                                            RowType flinkRowType,
+                                                            List<Integer> equalityFieldIds) {
     Map<String, String> props = table.properties();
     long targetFileSize = getTargetFileSizeBytes(props);
     FileFormat fileFormat = getFileFormat(props);
 
-    TaskWriterFactory<RowData> taskWriterFactory = new RowDataTaskWriterFactory(table.schema(), flinkRowType,
+    return new RowDataTaskWriterFactory(table.schema(), flinkRowType,
         table.spec(), table.locationProvider(), table.io(), table.encryption(), targetFileSize, fileFormat, props,
         equalityFieldIds);
+  }
 
+  static IcebergStreamWriter<RowData> createStreamWriter(Table table,
+                                                         RowType flinkSchema,
+                                                         List<Integer> equalityFieldIds) {
+    TaskWriterFactory<RowData> taskWriterFactory = createTaskWriterFactory(table, flinkSchema, equalityFieldIds);
     return new IcebergStreamWriter<>(table.name(), taskWriterFactory);
   }
 
