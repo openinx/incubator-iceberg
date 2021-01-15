@@ -258,17 +258,17 @@ public class FlinkSink {
 
       this.writeParallelism = writeParallelism == null ? rowDataInput.getParallelism() : writeParallelism;
 
-      DataStream<Void> returnStream = rowDataInput
+      DataStream<Long> committedStream = rowDataInput
           .transform(ICEBERG_STREAM_WRITER_NAME, TypeInformation.of(WriteResult.class), streamWriter)
           .setParallelism(writeParallelism)
-          .transform(ICEBERG_FILES_COMMITTER_NAME, Types.VOID, filesCommitter)
+          .transform(ICEBERG_FILES_COMMITTER_NAME, Types.LONG, filesCommitter)
           .setParallelism(1)
           .setMaxParallelism(1);
 
-      DataStream<?> stream = returnStream;
+      DataStream<?> stream = committedStream;
       if (autoCompact) {
         // Should disable the auto-compact for format v2 or passing non-null equality delete field ids now. TODO
-        SplitsSelector splitsSelector = new SplitsSelector(tableLoader, 64 * 1024 * 1024);
+        RewriteTaskSelector rewriteTaskSelector = new RewriteTaskSelector(tableLoader, 64 * 1024 * 1024);
 
         RewriteMapFunction rewriteMapFunction = new RewriteMapFunction(
             table.schema(),
@@ -279,13 +279,13 @@ public class FlinkSink {
             createTaskWriterFactory(table, flinkRowType, null)
         );
 
-        stream = returnStream
-            .transform("SmallFilesSelector", TypeInformation.of(CombinedScanTask.class), splitsSelector)
+        stream = committedStream
+            .transform("RewriteTaskSelector", TypeInformation.of(CombinedScanTask.class), rewriteTaskSelector)
             .setParallelism(1)
             .setMaxParallelism(1)
             .map(rewriteMapFunction)
             .setParallelism(writeParallelism)
-            .transform("Iceberg-Rewrite-Files-Committer", Types.VOID, filesCommitter)
+            .transform("IcebergRewriteFilesCommitter", Types.LONG, filesCommitter)
             .setParallelism(1)
             .setMaxParallelism(1);
       }

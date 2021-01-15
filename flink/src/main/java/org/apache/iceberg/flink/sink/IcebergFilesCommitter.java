@@ -58,8 +58,8 @@ import org.apache.iceberg.types.Types;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class IcebergFilesCommitter extends AbstractStreamOperator<Void>
-    implements OneInputStreamOperator<WriteResult, Void>, BoundedOneInput {
+class IcebergFilesCommitter extends AbstractStreamOperator<Long>
+    implements OneInputStreamOperator<WriteResult, Long>, BoundedOneInput {
 
   private static final long serialVersionUID = 1L;
   private static final long INITIAL_CHECKPOINT_ID = -1L;
@@ -298,6 +298,9 @@ class IcebergFilesCommitter extends AbstractStreamOperator<Void>
     operation.commit(); // abort is automatically called if this fails.
     long duration = System.currentTimeMillis() - start;
     LOG.info("Committed in {} ms", duration);
+
+    // Emitted the latest snapshot id to downstream.
+    output.collect(new StreamRecord<>(table.currentSnapshot().snapshotId()));
   }
 
   @Override

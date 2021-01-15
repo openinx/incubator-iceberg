@@ -47,10 +47,10 @@ import org.apache.iceberg.util.TableScanUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class SplitsSelector extends AbstractStreamOperator<CombinedScanTask>
-    implements OneInputStreamOperator<Void, CombinedScanTask> {
+class RewriteTaskSelector extends AbstractStreamOperator<CombinedScanTask>
+    implements OneInputStreamOperator<Long, CombinedScanTask> {
 
-  private static final Logger LOG = LoggerFactory.getLogger(SplitsSelector.class);
+  private static final Logger LOG = LoggerFactory.getLogger(RewriteTaskSelector.class);
 
   private final TableLoader tableLoader;
   private final long maxFileSizeToCompact;
@@ -60,7 +60,7 @@ class SplitsSelector extends AbstractStreamOperator<CombinedScanTask>
   private transient int splitLookback;
   private transient long splitOpenFileCost;
 
-  SplitsSelector(TableLoader tableLoader, long maxFileSizeToCompact) {
+  RewriteTaskSelector(TableLoader tableLoader, long maxFileSizeToCompact) {
     this.tableLoader = tableLoader;
     this.maxFileSizeToCompact = maxFileSizeToCompact;
   }
@@ -99,10 +99,11 @@ class SplitsSelector extends AbstractStreamOperator<CombinedScanTask>
   }
 
   @Override
-  public void processElement(StreamRecord<Void> element) {
+  public void processElement(StreamRecord<Long> element) {
     table.refresh();
 
-    for (CombinedScanTask combinedScanTask : planCombinedScanTask()) {
+    long latestSnapshotId = element.getValue();
+    for (CombinedScanTask combinedScanTask : planCombinedScanTask(latestSnapshotId)) {
       output.collect(new StreamRecord<>(combinedScanTask));
     }
   }
@@ -113,11 +114,12 @@ class SplitsSelector extends AbstractStreamOperator<CombinedScanTask>
     tableLoader.close();
   }
 
-  private Iterable<CombinedScanTask> planCombinedScanTask() {
+  private Iterable<CombinedScanTask> planCombinedScanTask(long latestSnapshotId) {
     List<CombinedScanTask> results = Lists.newArrayList();
     try (CloseableIterable<FileScanTask> fileScanTask = table.newScan()
         .caseSensitive(false)
         .ignoreResiduals()
+        .useSnapshot(latestSnapshotId)
         .planFiles()) {
 
       // Remove all files whose file size is greater than maxFileSizeToCompact.
