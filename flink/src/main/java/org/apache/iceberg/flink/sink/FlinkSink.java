@@ -57,9 +57,9 @@ import org.slf4j.LoggerFactory;
 
 import static org.apache.iceberg.TableProperties.DEFAULT_FILE_FORMAT;
 import static org.apache.iceberg.TableProperties.DEFAULT_FILE_FORMAT_DEFAULT;
+import static org.apache.iceberg.TableProperties.DEFAULT_NAME_MAPPING;
 import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE;
 import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE_DEFAULT;
-import static org.apache.iceberg.TableProperties.DEFAULT_NAME_MAPPING;
 import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES;
 import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES_DEFAULT;
 
@@ -267,27 +267,8 @@ public class FlinkSink {
 
       DataStream<?> stream = committedStream;
       if (autoCompact) {
-        // Should disable the auto-compact for format v2 or passing non-null equality delete field ids now. TODO
-        RewriteTaskSelector rewriteTaskSelector = new RewriteTaskSelector(tableLoader, 64 * 1024 * 1024);
-
-        RewriteMapFunction rewriteMapFunction = new RewriteMapFunction(
-            table.schema(),
-            PropertyUtil.propertyAsString(table.properties(), DEFAULT_NAME_MAPPING, null),
-            table.io(),
-            false,
-            table.encryption(),
-            createTaskWriterFactory(table, flinkRowType, null)
-        );
-
-        stream = committedStream
-            .transform("RewriteTaskSelector", TypeInformation.of(CombinedScanTask.class), rewriteTaskSelector)
-            .setParallelism(1)
-            .setMaxParallelism(1)
-            .map(rewriteMapFunction)
-            .setParallelism(writeParallelism)
-            .transform("IcebergRewriteFilesCommitter", Types.LONG, filesCommitter)
-            .setParallelism(1)
-            .setMaxParallelism(1);
+        // TODO passing a user-provided rewrite files parallelism.
+        stream = chainAutoCompactTasks(committedStream, table, tableLoader, flinkRowType, writeParallelism);
       }
 
       return stream.addSink(new DiscardingSink())
@@ -332,6 +313,36 @@ public class FlinkSink {
           throw new RuntimeException("Unrecognized write.distribution-mode: " + writeMode);
       }
     }
+  }
+
+  private static DataStream<Long> chainAutoCompactTasks(DataStream<Long> committedStream,
+                                                        Table table,
+                                                        TableLoader tableLoader,
+                                                        RowType flinkRowType,
+                                                        int rewriteParallelism) {
+    // TODO Should disable the auto-compact for format v2 or passing non-null equality delete field ids now.
+    RewriteTaskSelector rewriteTaskSelector = new RewriteTaskSelector(tableLoader, 64 * 1024 * 1024);
+
+    RewriteMapFunction rewriteMapFunction = new RewriteMapFunction(
+        table.schema(),
+        PropertyUtil.propertyAsString(table.properties(), DEFAULT_NAME_MAPPING, null),
+        table.io(),
+        false,
+        table.encryption(),
+        createTaskWriterFactory(table, flinkRowType, null)
+    );
+
+    // TODO Make it to be a rewrite files committer.
+    IcebergFilesCommitter rewriteFilesCommitter = new IcebergFilesCommitter(tableLoader, false);
+    return committedStream
+        .transform("RewriteTaskSelector", TypeInformation.of(CombinedScanTask.class), rewriteTaskSelector)
+        .setParallelism(1)
+        .setMaxParallelism(1)
+        .map(rewriteMapFunction)
+        .setParallelism(rewriteParallelism)
+        .transform("IcebergRewriteFilesCommitter", Types.LONG, rewriteFilesCommitter)
+        .setParallelism(1)
+        .setMaxParallelism(1);
   }
 
   static RowType toFlinkRowType(Schema schema, TableSchema requestedSchema) {
