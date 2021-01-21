@@ -315,7 +315,7 @@ public class FlinkSink {
     }
   }
 
-  private static DataStream<Long> chainAutoCompactTasks(DataStream<Long> committedStream,
+  private static DataStream<Void> chainAutoCompactTasks(DataStream<Long> committedStream,
                                                         Table table,
                                                         TableLoader tableLoader,
                                                         RowType flinkRowType,
@@ -332,15 +332,14 @@ public class FlinkSink {
         createTaskWriterFactory(table, flinkRowType, null)
     );
 
-    // TODO Make it to be a rewrite files committer.
-    IcebergFilesCommitter rewriteFilesCommitter = new IcebergFilesCommitter(tableLoader, false);
+    RewriteFilesCommitter rewriteFilesCommitter = new RewriteFilesCommitter(tableLoader, 10);
     return committedStream
         .transform("RewriteTaskSelector", TypeInformation.of(CombinedScanTask.class), rewriteTaskSelector)
         .setParallelism(1)
         .setMaxParallelism(1)
         .map(rewriteMapFunction)
         .setParallelism(rewriteParallelism)
-        .transform("IcebergRewriteFilesCommitter", Types.LONG, rewriteFilesCommitter)
+        .transform("IcebergRewriteFilesCommitter", Types.VOID, rewriteFilesCommitter)
         .setParallelism(1)
         .setMaxParallelism(1);
   }

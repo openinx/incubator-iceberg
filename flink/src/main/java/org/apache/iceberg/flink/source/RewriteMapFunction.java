@@ -19,20 +19,23 @@
 
 package org.apache.iceberg.flink.source;
 
+import java.util.stream.Collectors;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.iceberg.CombinedScanTask;
+import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.encryption.EncryptionManager;
 import org.apache.iceberg.flink.sink.TaskWriterFactory;
 import org.apache.iceberg.io.FileIO;
+import org.apache.iceberg.io.RewriteResult;
 import org.apache.iceberg.io.TaskWriter;
-import org.apache.iceberg.io.WriteResult;
+import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class RewriteMapFunction extends RichMapFunction<CombinedScanTask, WriteResult> {
+public class RewriteMapFunction extends RichMapFunction<CombinedScanTask, RewriteResult> {
   private static final Logger LOG = LoggerFactory.getLogger(RewriteMapFunction.class);
 
   private int subTaskId;
@@ -64,7 +67,10 @@ public class RewriteMapFunction extends RichMapFunction<CombinedScanTask, WriteR
   }
 
   @Override
-  public WriteResult map(CombinedScanTask task) throws Exception {
+  public RewriteResult map(CombinedScanTask task) throws Exception {
+    Preconditions.checkArgument(task.files().stream().mapToInt(t -> t.deletes().size()).sum() == 0,
+        "Cannot rewrite with delete files now, it will be supported in iceberg format v2.");
+
     // Initialize the task writer.
     TaskWriter<RowData> writer = taskWriterFactory.create();
     try (RowDataIterator iterator = new RowDataIterator(task, io, encryptionManager, schema,
@@ -74,7 +80,10 @@ public class RewriteMapFunction extends RichMapFunction<CombinedScanTask, WriteR
         writer.write(rowData);
       }
 
-      return writer.complete();
+      return RewriteResult.builder()
+          .addDataFilesToDelete(task.files().stream().map(FileScanTask::file).collect(Collectors.toList()))
+          .addDataFilesToAdd(writer.dataFiles())
+          .build();
     } catch (Throwable originalThrowable) {
       try {
         LOG.error("Aborting commit for  (subTaskId {}, attemptId {})", subTaskId, attemptId);

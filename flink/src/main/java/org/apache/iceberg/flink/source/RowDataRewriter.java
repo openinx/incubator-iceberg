@@ -36,7 +36,7 @@ import org.apache.iceberg.flink.FlinkSchemaUtil;
 import org.apache.iceberg.flink.sink.RowDataTaskWriterFactory;
 import org.apache.iceberg.flink.sink.TaskWriterFactory;
 import org.apache.iceberg.io.FileIO;
-import org.apache.iceberg.io.WriteResult;
+import org.apache.iceberg.io.RewriteResult;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.util.PropertyUtil;
 
@@ -80,11 +80,11 @@ public class RowDataRewriter {
   public List<DataFile> rewriteDataForTasks(DataStream<CombinedScanTask> dataStream, int parallelism) throws Exception {
     RewriteMapFunction map = new RewriteMapFunction(schema, nameMapping, io, caseSensitive,
         encryptionManager, taskWriterFactory);
-    DataStream<WriteResult> ds = dataStream.map(map).setParallelism(parallelism);
+    DataStream<RewriteResult> ds = dataStream.map(map).setParallelism(parallelism);
 
     List<DataFile> dataFiles = Lists.newArrayList();
     ds.executeAndCollect("")
-        .forEachRemaining(writeResult -> Collections.addAll(dataFiles, writeResult.dataFiles()));
+        .forEachRemaining(writeResult -> Collections.addAll(dataFiles, writeResult.dataFilesToAdd()));
 
     return dataFiles;
   }
