@@ -41,7 +41,6 @@ import org.apache.flink.table.runtime.typeutils.SortedMapTypeInfo;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.ManifestFile;
 import org.apache.iceberg.ReplacePartitions;
-import org.apache.iceberg.RewriteFiles;
 import org.apache.iceberg.RowDelta;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.SnapshotUpdate;
@@ -248,28 +247,6 @@ class IcebergFilesCommitter extends AbstractStreamOperator<Long>
     }
 
     commitOperation(dynamicOverwrite, numFiles, 0, "dynamic partition overwrite", newFlinkJobId, checkpointId);
-  }
-
-  private void commitRewriteTxn(NavigableMap<Long, WriteResult> pendingResults,
-                                String newFlinkJobId,
-                                long checkpointId) {
-    // Partition overwrite does not support delete files.
-    int deleteFilesNum = pendingResults.values().stream().mapToInt(r -> r.deleteFiles().length).sum();
-    Preconditions.checkState(deleteFilesNum == 0, "Cannot rewrite table files with delete files.");
-
-    // Commit the rewrite transaction.
-    RewriteFiles rewriteFiles = table.newRewrite();
-
-    int numFiles = 0;
-    for (WriteResult result : pendingResults.values()) {
-      Preconditions.checkState(result.referencedDataFiles().length == 0, "Should have no referenced data files.");
-
-      numFiles += result.dataFiles().length;
-      // TODO the WriteResult need both dataFilesToAdd and dataFilesToRemove ?
-//      Arrays.stream(result.dataFiles()).forEach(rewriteFiles.);
-    }
-
-    commitOperation(rewriteFiles, numFiles, 0, "dynamic partition overwrite", newFlinkJobId, checkpointId);
   }
 
   private void commitDeltaTxn(NavigableMap<Long, WriteResult> pendingResults, String newFlinkJobId, long checkpointId) {
