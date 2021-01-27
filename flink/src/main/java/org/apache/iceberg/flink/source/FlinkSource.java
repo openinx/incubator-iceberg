@@ -28,12 +28,12 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.RowDataTypeInfo;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableScan;
 import org.apache.iceberg.encryption.EncryptionManager;
 import org.apache.iceberg.expressions.Expression;
+import org.apache.iceberg.flink.CompatibilityUtil;
 import org.apache.iceberg.flink.FlinkSchemaUtil;
 import org.apache.iceberg.flink.TableLoader;
 import org.apache.iceberg.io.FileIO;
@@ -194,7 +194,7 @@ public class FlinkSource {
       FlinkInputFormat format = buildFormat();
 
       ScanContext context = contextBuilder.build();
-      TypeInformation<RowData> typeInfo = RowDataTypeInfo.of(FlinkSchemaUtil.convert(context.project()));
+      TypeInformation<RowData> typeInfo = CompatibilityUtil.toTypeInfo(FlinkSchemaUtil.convert(context.project()));
 
       if (!context.isStreaming()) {
         return env.createInput(format, typeInfo);

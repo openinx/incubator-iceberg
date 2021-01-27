@@ -33,7 +33,6 @@ import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.DataFormatConverters;
-import org.apache.flink.table.runtime.typeutils.RowDataTypeInfo;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.Row;
@@ -43,6 +42,7 @@ import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.flink.CompatibilityUtil;
 import org.apache.iceberg.flink.FlinkSchemaUtil;
 import org.apache.iceberg.flink.TableLoader;
 import org.apache.iceberg.io.WriteResult;
@@ -101,7 +101,7 @@ public class FlinkSink {
     DataType[] fieldDataTypes = tableSchema.getFieldDataTypes();
 
     DataFormatConverters.RowConverter rowConverter = new DataFormatConverters.RowConverter(fieldDataTypes);
-    return builderFor(input, rowConverter::toInternal, RowDataTypeInfo.of(rowType))
+    return builderFor(input, rowConverter::toInternal, CompatibilityUtil.toTypeInfo(rowType))
         .tableSchema(tableSchema);
   }
 

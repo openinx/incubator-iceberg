@@ -26,7 +26,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogTable;
@@ -77,26 +76,21 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
 
   @Test
   public void testGetTable() {
-    validationCatalog.createTable(
-        TableIdentifier.of(icebergNamespace, "tl"),
-        new Schema(
-            Types.NestedField.optional(0, "id", Types.LongType.get()),
-            Types.NestedField.optional(1, "strV", Types.StringType.get())));
-    Assert.assertEquals(
-        Arrays.asList(
-            TableColumn.of("id", DataTypes.BIGINT()),
-            TableColumn.of("strV", DataTypes.STRING())),
-        getTableEnv().from("tl").getSchema().getTableColumns());
-    Assert.assertTrue(getTableEnv().getCatalog(catalogName).get().tableExists(ObjectPath.fromString("db.tl")));
+    sql("CREATE TABLE tl(id BIGINT, strV STRING)");
+
+    Table table = validationCatalog.loadTable(TableIdentifier.of(icebergNamespace, "tl"));
+    Schema iSchema = new Schema(
+        Types.NestedField.optional(1, "id", Types.LongType.get()),
+        Types.NestedField.optional(2, "strV", Types.StringType.get())
+    );
+    Assert.assertEquals("Should load the expected iceberg schema", iSchema.toString(), table.schema().toString());
   }
 
   @Test
   public void testRenameTable() {
     Assume.assumeFalse("HadoopCatalog does not support rename table", isHadoopCatalog);
 
-    validationCatalog.createTable(
-        TableIdentifier.of(icebergNamespace, "tl"),
-        new Schema(Types.NestedField.optional(0, "id", Types.LongType.get())));
+    sql("CREATE TABLE tl(id BIGINT)");
     sql("ALTER TABLE tl RENAME TO tl2");
     AssertHelpers.assertThrows(
         "Should fail if trying to get a nonexistent table",
@@ -104,9 +98,12 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
         "Table `tl` was not found.",
         () -> getTableEnv().from("tl")
     );
-    Assert.assertEquals(
-        Collections.singletonList(TableColumn.of("id", DataTypes.BIGINT())),
-        getTableEnv().from("tl2").getSchema().getTableColumns());
+
+    Table table = validationCatalog.loadTable(TableIdentifier.of(icebergNamespace, "tl2"));
+    Schema iSchema = new Schema(
+        Types.NestedField.optional(1, "id", Types.LongType.get())
+    );
+    Assert.assertEquals("Should load the expected iceberg schema", iSchema.toString(), table.schema().toString());
   }
 
   @Test
