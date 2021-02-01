@@ -39,6 +39,7 @@ import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.TableTestBase;
 import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
+import org.apache.iceberg.flink.MiniClusterBase;
 import org.apache.iceberg.flink.SimpleDataUtil;
 import org.apache.iceberg.flink.TestTableLoader;
 import org.apache.iceberg.flink.source.BoundedTestSource;
@@ -112,7 +113,7 @@ public class TestFlinkIcebergSinkV2 extends TableTestBase {
         .set(TableProperties.DEFAULT_FILE_FORMAT, format.name())
         .commit();
 
-    env = StreamExecutionEnvironment.getExecutionEnvironment()
+    env = StreamExecutionEnvironment.getExecutionEnvironment(MiniClusterBase.CONF)
         .enableCheckpointing(100L)
         .setParallelism(parallelism)
         .setMaxParallelism(parallelism);
