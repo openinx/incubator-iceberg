@@ -97,7 +97,7 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
   private transient long splitOpenFileCost;
   private transient String schemaString;
   private transient String specString;
-  private transient ResidualEvaluator evaluator;
+  private transient ResidualEvaluator ignored = ResidualEvaluator.unpartitioned(Expressions.alwaysTrue());
   private transient ManifestOutputFileFactory manifestOutputFileFactory;
 
   CompactCoordinator(TableLoader tableLoader) {
@@ -112,16 +112,19 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
     // Open the table loader and create a new table.
     this.tableLoader.open();
     this.table = tableLoader.loadTable();
+
     this.targetSizeInBytes = parseTargetSizeInBytes(table.properties());
     this.splitLookback = parseSplitLookback(table.properties());
     this.splitOpenFileCost = parseSplitOpenFileCost(table.properties());
     this.schemaString = SchemaParser.toJson(table.schema());
     this.specString = PartitionSpecParser.toJson(table.spec());
-    this.evaluator = ResidualEvaluator.of(table.spec(), Expressions.alwaysTrue(), false);
 
     int subTaskId = getRuntimeContext().getIndexOfThisSubtask();
     int attemptId = getRuntimeContext().getAttemptNumber();
-    this.manifestOutputFileFactory = FlinkManifestUtil.createOutputFileFactory(table, flinkJobId, subTaskId, attemptId);
+
+    // Use the <flink-job-id>-compactor as the identifier because we don't want to overwrite the committer's manifests.
+    String identifier = String.format("%s-compactor", flinkJobId);
+    this.manifestOutputFileFactory = FlinkManifestUtil.createOutputFileFactory(table, identifier, subTaskId, attemptId);
 
     this.jobIdState = context.getOperatorStateStore().getListState(JOB_ID_DESCRIPTOR);
     this.checkpointsState = context.getOperatorStateStore().getListState(STATE_DESCRIPTOR);
@@ -184,7 +187,7 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
 
     // Convert the data files to FileScanTasks.
     Iterable<FileScanTask> scanTasks = Arrays.stream(deltaManifests.writeResult(table.io()).dataFiles())
-        .map(dataFile -> new BaseFileScanTask(dataFile, null, schemaString, specString, evaluator))
+        .map(dataFile -> new BaseFileScanTask(dataFile, null, schemaString, specString, ignored))
         .collect(Collectors.toList());
 
     List<CombinedScanTask> combinedScanTasks = groupTasksByPartition(scanTasks).values().stream()
