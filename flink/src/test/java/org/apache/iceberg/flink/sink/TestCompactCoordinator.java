@@ -21,10 +21,14 @@ package org.apache.iceberg.flink.sink;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.operators.testutils.MockEnvironment;
 import org.apache.flink.runtime.operators.testutils.MockEnvironmentBuilder;
 import org.apache.flink.runtime.operators.testutils.MockInputSplitProvider;
@@ -34,16 +38,17 @@ import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.table.data.RowData;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileFormat;
+import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.TableTestBase;
 import org.apache.iceberg.flink.SimpleDataUtil;
 import org.apache.iceberg.flink.TestTableLoader;
 import org.apache.iceberg.io.WriteResult;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -55,8 +60,6 @@ import static org.apache.iceberg.flink.sink.ManifestOutputFileFactory.FLINK_MANI
 
 @RunWith(Parameterized.class)
 public class TestCompactCoordinator extends TableTestBase {
-  private static final Configuration CONF = new Configuration();
-
   private String tablePath;
   private File flinkManifestFolder;
 
@@ -103,13 +106,61 @@ public class TestCompactCoordinator extends TableTestBase {
     long timestamp = 0;
 
     JobID jobID = new JobID();
+    DataFile dataFile1;
+    OperatorSubtaskState state;
     try (OneInputStreamOperatorTestHarness<WriteResult, CombinedScanTask> harness = createOperator(jobID)) {
       harness.setup();
       harness.open();
 
-      harness.processElement(of(null), ++timestamp);
+      // Process the 1th element.
+      RowData row1 = SimpleDataUtil.createRowData(1, "AAAA");
+      dataFile1 = writeDataFile("data-1", ImmutableList.of(row1));
+      harness.processElement(of(dataFile1), ++timestamp);
 
+      // Snapshot checkpoint#1.
+      state = harness.snapshot(++checkpointId, ++timestamp);
+
+      assertFlinkManifests(1);
+      assertOutputFiles(harness, ImmutableList.of());
+    }
+
+    try (OneInputStreamOperatorTestHarness<WriteResult, CombinedScanTask> harness = createOperator(jobID)) {
+      harness.setup();
+      harness.initializeState(state);
+      harness.open();
+
+      assertFlinkManifests(1);
+      assertOutputFiles(harness, ImmutableList.of(dataFile1));
+
+      // Process the 2th element.
+      RowData row2 = SimpleDataUtil.createRowData(2, "BBBB");
+      DataFile dataFile2 = writeDataFile("data-2", ImmutableList.of(row2));
+      harness.processElement(of(dataFile2), ++timestamp);
+
+      // Snapshot checkpoint#2
+      harness.snapshot(++checkpointId, ++timestamp);
+      assertFlinkManifests(2);
+      assertOutputFiles(harness, ImmutableList.of(dataFile1));
+
+      // Complete checkpoint#2
       harness.notifyOfCompletedCheckpoint(checkpointId);
+
+      Assert.assertFalse(new File(dataFile1.path().toString()).exists());
+      Assert.assertTrue(new File(dataFile2.path().toString()).exists());
+      assertFlinkManifests(1);
+      assertOutputFiles(harness, ImmutableList.of(dataFile1, dataFile2));
+
+      // Snapshot checkpoint#3
+      harness.snapshot(++checkpointId, ++timestamp);
+      assertFlinkManifests(1);
+
+      // Complete checkpoint#3
+      harness.notifyOfCompletedCheckpoint(checkpointId);
+
+      Assert.assertFalse(new File(dataFile1.path().toString()).exists());
+      Assert.assertFalse(new File(dataFile2.path().toString()).exists());
+      assertFlinkManifests(0);
+      assertOutputFiles(harness, ImmutableList.of(dataFile1, dataFile2));
     }
   }
 
@@ -130,16 +181,40 @@ public class TestCompactCoordinator extends TableTestBase {
       harness.snapshot(++checkpointId, ++timestamp);
       harness.notifyOfCompletedCheckpoint(checkpointId);
 
-      List<CombinedScanTask> tasks = harness.extractOutputValues();
-      Assert.assertEquals(1, tasks.size());
-      CombinedScanTask task = tasks.get(0);
-      Assert.assertEquals(1, task.files().size());
-      Assert.assertEquals(dataFile1.path(), task.files().stream().findFirst().get().file().path());
+      assertOutputFiles(harness, ImmutableList.of(dataFile1));
     }
   }
 
+  private void assertOutputFiles(OneInputStreamOperatorTestHarness<WriteResult, CombinedScanTask> harness,
+                                 List<DataFile> expectedFiles) {
+    List<CombinedScanTask> tasks = harness.extractOutputValues();
+    Assert.assertEquals(expectedFiles.size(), harness.extractOutputValues().size());
+
+    for (int i = 0; i < tasks.size(); i++) {
+      CombinedScanTask task = tasks.get(i);
+      DataFile expectedFile = expectedFiles.get(i);
+
+      List<FileScanTask> scanTasks = Lists.newArrayList(task.files());
+      Assert.assertEquals(1, scanTasks.size());
+      FileScanTask scanTask = scanTasks.get(0);
+
+      Assert.assertNotNull(scanTask);
+      Assert.assertEquals(expectedFile.path(), scanTask.file().path());
+    }
+  }
+
+  private List<Path> assertFlinkManifests(int expectedCount) throws IOException {
+    List<Path> manifests = Files.list(flinkManifestFolder.toPath())
+        .filter(p -> !p.toString().endsWith(".crc"))
+        .filter(p -> p.toString().contains("-compactor"))
+        .collect(Collectors.toList());
+    Assert.assertEquals(String.format("Expected %s flink manifests, but the list is: %s", expectedCount, manifests),
+        expectedCount, manifests.size());
+    return manifests;
+  }
+
   private DataFile writeDataFile(String filename, List<RowData> rows) throws IOException {
-    return SimpleDataUtil.writeFile(table.schema(), table.spec(), CONF, tablePath, format.addExtension(filename), rows);
+    return SimpleDataUtil.writeFile(table.schema(), table.spec(), tablePath, format.addExtension(filename), rows);
   }
 
   private static WriteResult of(DataFile dataFile) {

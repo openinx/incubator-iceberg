@@ -56,7 +56,6 @@ import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.WriteResult;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.base.Predicates;
-import org.apache.iceberg.relocated.com.google.common.base.Strings;
 import org.apache.iceberg.relocated.com.google.common.collect.ListMultimap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
@@ -82,15 +81,15 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
   private final NavigableMap<Long, byte[]> dataFilesPerCheckpoint = Maps.newTreeMap();
   private final List<WriteResult> writeResultsOfCurrentCkpt = Lists.newArrayList();
 
-  // Flink state to maintain the job id.
-  private static final ListStateDescriptor<String> JOB_ID_DESCRIPTOR = buildJobIdDescriptor();
-  private transient ListState<String> jobIdState;
+  // Flink state to maintain the max emitted checkpoint id.
+  private static final ListStateDescriptor<Long> MAX_EMITTED_CKP_ID_DESCRIPTOR = buildMaxEmittedCkpIdDescriptor();
+  private transient ListState<Long> maxEmittedCheckpointIdState;
+  private transient long maxEmittedCheckpointId;
 
   // Flink state to maintain all the un-compacted data files.
   private static final ListStateDescriptor<SortedMap<Long, byte[]>> STATE_DESCRIPTOR = buildStateDescriptor();
   private transient ListState<SortedMap<Long, byte[]>> checkpointsState;
 
-  private transient String flinkJobId;
   private transient Table table;
   private transient long targetSizeInBytes;
   private transient int splitLookback;
@@ -107,7 +106,6 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
   @Override
   public void initializeState(StateInitializationContext context) throws Exception {
     super.initializeState(context);
-    this.flinkJobId = getContainingTask().getEnvironment().getJobID().toString();
 
     // Open the table loader and create a new table.
     this.tableLoader.open();
@@ -121,27 +119,22 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
 
     int subTaskId = getRuntimeContext().getIndexOfThisSubtask();
     int attemptId = getRuntimeContext().getAttemptNumber();
-
-    // Use the <flink-job-id>-compactor as the identifier because we don't want to overwrite the committer's manifests.
+    // Use the <Job-ID>-compactor as the identifier because we don't want to overwrite the committer's manifests.
+    String flinkJobId = getContainingTask().getEnvironment().getJobID().toString();
     String identifier = String.format("%s-compactor", flinkJobId);
     this.manifestOutputFileFactory = FlinkManifestUtil.createOutputFileFactory(table, identifier, subTaskId, attemptId);
 
-    this.jobIdState = context.getOperatorStateStore().getListState(JOB_ID_DESCRIPTOR);
+    this.maxEmittedCheckpointId = -1L;
+    this.maxEmittedCheckpointIdState = context.getOperatorStateStore().getListState(MAX_EMITTED_CKP_ID_DESCRIPTOR);
     this.checkpointsState = context.getOperatorStateStore().getListState(STATE_DESCRIPTOR);
 
     if (context.isRestored()) {
-      String restoredFlinkJobId = jobIdState.get().iterator().next();
-      Preconditions.checkState(!Strings.isNullOrEmpty(restoredFlinkJobId),
-          "Flink job id parsed from checkpoint snapshot shouldn't be null or empty");
+      this.maxEmittedCheckpointId = maxEmittedCheckpointIdState.get().iterator().next();
+      this.dataFilesPerCheckpoint.putAll(checkpointsState.get().iterator().next());
 
-      long maxCommittedCheckpointId = IcebergFilesCommitter.getMaxCommittedCheckpointId(table, restoredFlinkJobId);
-
-      NavigableMap<Long, byte[]> compactedDataFiles = Maps
-          .newTreeMap(checkpointsState.get().iterator().next())
-          .headMap(maxCommittedCheckpointId, false);
-
-      if (!compactedDataFiles.isEmpty()) {
-        expireCompactedDataFiles(compactedDataFiles, table.io());
+      NavigableMap<Long, byte[]> pending = dataFilesPerCheckpoint.tailMap(maxEmittedCheckpointId, false);
+      if (!pending.isEmpty()) {
+        emitUpToCheckpoint(dataFilesPerCheckpoint, pending.lastKey());
       }
     }
   }
@@ -160,8 +153,8 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
     checkpointsState.clear();
     checkpointsState.add(dataFilesPerCheckpoint);
 
-    jobIdState.clear();
-    jobIdState.add(flinkJobId);
+    maxEmittedCheckpointIdState.clear();
+    maxEmittedCheckpointIdState.add(maxEmittedCheckpointId);
 
     // Clear the local buffer for current checkpoint.
     writeResultsOfCurrentCkpt.clear();
@@ -170,41 +163,16 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
   @Override
   public void notifyCheckpointComplete(long checkpointId) throws Exception {
     super.notifyCheckpointComplete(checkpointId);
-    handleCheckpointComplete(checkpointId);
-  }
 
-  private void handleCheckpointComplete(long checkpointId) {
-    // All data files which have a smaller checkpoint id than this completed id have been compacted in RewriteFunction
+    // All data files whose checkpoint id is <= the completed emitted id have been compacted in RewriteFunction
     // and the results are persisted into flink state backend in IcebergFilesCommitter. So it's safe to expire those
     // data files from filesystem.
-    NavigableMap<Long, byte[]> dataFilesToExpire = dataFilesPerCheckpoint.headMap(checkpointId, false);
+    NavigableMap<Long, byte[]> dataFilesToExpire = dataFilesPerCheckpoint.headMap(maxEmittedCheckpointId, true);
     if (!dataFilesToExpire.isEmpty()) {
       expireCompactedDataFiles(dataFilesToExpire, table.io());
     }
 
-    // Emit the data files that was collected from this completed checkpoint id to downstream RewriteFunction.
-    DeltaManifests deltaManifests = deserializeDataFiles(dataFilesPerCheckpoint.get(checkpointId), table.io());
-    if (deltaManifests == null) {
-      return;
-    }
-
-    // Convert the data files to FileScanTasks.
-    Iterable<FileScanTask> scanTasks = Arrays.stream(deltaManifests.writeResult(table.io()).dataFiles())
-        .map(dataFile -> new BaseFileScanTask(dataFile, null, schemaString, specString, ignored))
-        .collect(Collectors.toList());
-
-    List<CombinedScanTask> combinedScanTasks = groupTasksByPartition(scanTasks).values().stream()
-        .map(tasks -> {
-          CloseableIterable<FileScanTask> splitTasks = TableScanUtil.splitFiles(
-              CloseableIterable.withNoopClose(tasks), targetSizeInBytes);
-          return TableScanUtil.planTasks(splitTasks, targetSizeInBytes, splitLookback, splitOpenFileCost);
-        })
-        .flatMap(Streams::stream)
-        .collect(Collectors.toList());
-
-    for (CombinedScanTask task : combinedScanTasks) {
-      output.collect(new StreamRecord<>(task));
-    }
+    emitUpToCheckpoint(dataFilesPerCheckpoint, checkpointId);
   }
 
   @Override
@@ -214,15 +182,18 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
 
   @Override
   public void endInput() throws IOException {
+    if (dataFilesPerCheckpoint.isEmpty()) {
+      return;
+    }
+
     // Add the data files from current checkpoint id.
     long checkpointId = Long.MAX_VALUE;
 
     // Emit the data files to downstream rewrite function.
     dataFilesPerCheckpoint.put(checkpointId, writeToManifest(checkpointId));
-    handleCheckpointComplete(checkpointId);
+    emitUpToCheckpoint(dataFilesPerCheckpoint, checkpointId);
 
-    // Expire all data files for batch job.
-    expireCompactedDataFiles(dataFilesPerCheckpoint, table.io());
+    // TODO Should we expire the data files and manifests in the next time ? Now it will remain many orphan files.
   }
 
   @Override
@@ -312,6 +283,37 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
     }
   }
 
+  private void emitUpToCheckpoint(NavigableMap<Long, byte[]> deltaManifestsMap, long checkpointId) {
+    NavigableMap<Long, byte[]> pending = deltaManifestsMap.subMap(maxEmittedCheckpointId, false, checkpointId, true);
+    for (Map.Entry<Long, byte[]> entry : pending.entrySet()) {
+      // Emit the data files that was collected from this completed checkpoint id to downstream RewriteFunction.
+      DeltaManifests deltaManifests = deserializeDataFiles(entry.getValue(), table.io());
+      if (deltaManifests == null) {
+        continue;
+      }
+
+      // Convert the data files to FileScanTasks.
+      Iterable<FileScanTask> scanTasks = Arrays.stream(deltaManifests.writeResult(table.io()).dataFiles())
+          .map(dataFile -> new BaseFileScanTask(dataFile, null, schemaString, specString, ignored))
+          .collect(Collectors.toList());
+
+      List<CombinedScanTask> combinedScanTasks = groupTasksByPartition(scanTasks).values().stream()
+          .map(tasks -> {
+            CloseableIterable<FileScanTask> splitTasks = TableScanUtil.splitFiles(
+                CloseableIterable.withNoopClose(tasks), targetSizeInBytes);
+            return TableScanUtil.planTasks(splitTasks, targetSizeInBytes, splitLookback, splitOpenFileCost);
+          })
+          .flatMap(Streams::stream)
+          .collect(Collectors.toList());
+
+      for (CombinedScanTask task : combinedScanTasks) {
+        output.collect(new StreamRecord<>(task));
+      }
+
+      maxEmittedCheckpointId = entry.getKey();
+    }
+  }
+
   private static void expireCompactedDataFiles(NavigableMap<Long, byte[]> compactedDataFiles, FileIO io) {
     List<DeltaManifests> deltaManifestsToExpire = compactedDataFiles.values()
         .stream()
@@ -356,9 +358,9 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
     compactedDataFiles.clear();
   }
 
-  private static ListStateDescriptor<String> buildJobIdDescriptor() {
+  private static ListStateDescriptor<Long> buildMaxEmittedCkpIdDescriptor() {
     return new ListStateDescriptor<>(
-        "Iceberg-compact-coordinator-jobId-state", BasicTypeInfo.STRING_TYPE_INFO
+        "Iceberg-compact-coordinator-max-emitted-checkpoint-id", BasicTypeInfo.LONG_TYPE_INFO
     );
   }
 
