@@ -138,7 +138,7 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
 
       NavigableMap<Long, byte[]> compactedDataFiles = Maps
           .newTreeMap(checkpointsState.get().iterator().next())
-          .tailMap(maxCommittedCheckpointId, false);
+          .headMap(maxCommittedCheckpointId, false);
 
       if (!compactedDataFiles.isEmpty()) {
         expireCompactedDataFiles(compactedDataFiles, table.io());
@@ -170,7 +170,10 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
   @Override
   public void notifyCheckpointComplete(long checkpointId) throws Exception {
     super.notifyCheckpointComplete(checkpointId);
+    handleCheckpointComplete(checkpointId);
+  }
 
+  private void handleCheckpointComplete(long checkpointId) {
     // All data files which have a smaller checkpoint id than this completed id have been compacted in RewriteFunction
     // and the results are persisted into flink state backend in IcebergFilesCommitter. So it's safe to expire those
     // data files from filesystem.
@@ -210,8 +213,16 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
   }
 
   @Override
-  public void endInput() throws Exception {
-    // TODO
+  public void endInput() throws IOException {
+    // Add the data files from current checkpoint id.
+    long checkpointId = Long.MAX_VALUE;
+
+    // Emit the data files to downstream rewrite function.
+    dataFilesPerCheckpoint.put(checkpointId, writeToManifest(checkpointId));
+    handleCheckpointComplete(checkpointId);
+
+    // Expire all data files for batch job.
+    expireCompactedDataFiles(dataFilesPerCheckpoint, table.io());
   }
 
   @Override
@@ -336,7 +347,7 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
         try {
           io.deleteFile(deltaManifests.dataManifest().path());
         } catch (Exception e) {
-          LOG.warn("Failed to delete the expired flink manifest file: {}", deltaManifests.dataManifest().path());
+          LOG.warn("Failed to delete the expired flink manifest file: {}", deltaManifests.dataManifest().path(), e);
         }
       }
     }

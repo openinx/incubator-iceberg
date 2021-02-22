@@ -22,7 +22,6 @@ package org.apache.iceberg;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -434,7 +433,8 @@ abstract class BaseFile<F>
     if (map != null) {
       Map<K, V> copy = Maps.newHashMapWithExpectedSize(map.size());
       copy.putAll(map);
-      return Collections.unmodifiableMap(copy);
+      // TODO Need an unit test to cover the BaseFile's kryo serialization.
+      return copy;
     }
     return null;
   }
