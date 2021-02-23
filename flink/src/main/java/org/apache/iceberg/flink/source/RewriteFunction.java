@@ -23,7 +23,6 @@ import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.iceberg.CombinedScanTask;
-import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.encryption.EncryptionManager;
 import org.apache.iceberg.flink.sink.TaskWriterFactory;
@@ -31,14 +30,12 @@ import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.TaskWriter;
 import org.apache.iceberg.io.WriteResult;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
-import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class RewriteFunction extends RichMapFunction<CombinedScanTask, WriteResult> {
   private static final Logger LOG = LoggerFactory.getLogger(RewriteFunction.class);
 
-  private TaskWriter<RowData> writer;
   private int subTaskId;
   private int attemptId;
 
@@ -69,13 +66,8 @@ public class RewriteFunction extends RichMapFunction<CombinedScanTask, WriteResu
 
   @Override
   public WriteResult map(CombinedScanTask task) throws Exception {
-    if (task.files().size() == 1) {
-      FileScanTask scanTask = Lists.newArrayList(task.files()).get(0);
-      return WriteResult.builder().addDataFiles(scanTask.file()).build();
-    }
-
     // Initialize the task writer.
-    this.writer = taskWriterFactory.create();
+    TaskWriter<RowData> writer = taskWriterFactory.create();
     try (RowDataIterator iterator = new RowDataIterator(task, io, encryptionManager, schema, schema, nameMapping,
         caseSensitive)) {
       while (iterator.hasNext()) {

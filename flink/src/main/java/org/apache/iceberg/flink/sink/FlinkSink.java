@@ -273,15 +273,17 @@ public class FlinkSink {
 
         returnStream = returnStream
             .transform(COMPACT_COORDINATOR_NAME, TypeInformation.of(CombinedScanTask.class), coordinator)
+            .setMaxParallelism(1)
             .setParallelism(1)
-            .map(rewriteFunction);
+            .map(rewriteFunction, TypeInformation.of(WriteResult.class))
+            .setMaxParallelism(rowDataInput.getParallelism())
+            .setParallelism(rowDataInput.getParallelism());
       }
 
-      returnStream.transform(ICEBERG_FILES_COMMITTER_NAME, Types.VOID, filesCommitter)
+      return returnStream.transform(ICEBERG_FILES_COMMITTER_NAME, Types.VOID, filesCommitter)
           .setParallelism(1)
-          .setMaxParallelism(1);
-
-      return returnStream.addSink(new DiscardingSink())
+          .setMaxParallelism(1)
+          .addSink(new DiscardingSink())
           .name(String.format("IcebergSink %s", table.name()))
           .setParallelism(1);
     }

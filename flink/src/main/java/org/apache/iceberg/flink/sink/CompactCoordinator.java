@@ -96,7 +96,7 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
   private transient long splitOpenFileCost;
   private transient String schemaString;
   private transient String specString;
-  private transient ResidualEvaluator ignored = ResidualEvaluator.unpartitioned(Expressions.alwaysTrue());
+  private transient ResidualEvaluator ignored;
   private transient ManifestOutputFileFactory manifestOutputFileFactory;
 
   CompactCoordinator(TableLoader tableLoader) {
@@ -116,6 +116,7 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
     this.splitOpenFileCost = parseSplitOpenFileCost(table.properties());
     this.schemaString = SchemaParser.toJson(table.schema());
     this.specString = PartitionSpecParser.toJson(table.spec());
+    this.ignored = ResidualEvaluator.unpartitioned(Expressions.alwaysTrue());
 
     int subTaskId = getRuntimeContext().getIndexOfThisSubtask();
     int attemptId = getRuntimeContext().getAttemptNumber();
@@ -162,6 +163,7 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
   @Override
   public void notifyCheckpointComplete(long checkpointId) throws Exception {
     super.notifyCheckpointComplete(checkpointId);
+    LOG.info("Notify checkpoint complete - checkpointId: {}", checkpointId);
 
     // All data files whose checkpoint id is <= the completed emitted id have been compacted in RewriteFunction
     // and the results are persisted into flink state backend in IcebergFilesCommitter. So it's safe to expire those
@@ -283,6 +285,12 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
   }
 
   private void emitUpToCheckpoint(NavigableMap<Long, byte[]> deltaManifestsMap, long checkpointId) {
+    LOG.info("Emit the data files from checkpointId {} to checkpointId {}", maxEmittedCheckpointId, checkpointId);
+    if (maxEmittedCheckpointId >= checkpointId) {
+      // It's possible that a new notifyCheckpointComplete is called after endInput() for bounded streaming job.
+      return;
+    }
+
     NavigableMap<Long, byte[]> pending = deltaManifestsMap.subMap(maxEmittedCheckpointId, false, checkpointId, true);
     for (Map.Entry<Long, byte[]> entry : pending.entrySet()) {
       // Emit the data files that was collected from this completed checkpoint id to downstream RewriteFunction.
@@ -297,10 +305,15 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
           .map(dataFile -> new BaseFileScanTask(dataFile, null, schemaString, specString, ignored))
           .collect(Collectors.toList());
 
+      LOG.info("Emit {} data files from checkpointId {} to checkpointId {}", Lists.newArrayList(scanTasks).size(),
+          maxEmittedCheckpointId, checkpointId);
+
       List<CombinedScanTask> combinedScanTasks = groupTasksByPartition(scanTasks).values().stream()
-          .map(tasks -> {
+          .map(partitionScanTasks -> {
             CloseableIterable<FileScanTask> splitTasks = TableScanUtil.splitFiles(
-                CloseableIterable.withNoopClose(tasks), targetSizeInBytes);
+                CloseableIterable.withNoopClose(partitionScanTasks),
+                targetSizeInBytes);
+
             return TableScanUtil.planTasks(splitTasks, targetSizeInBytes, splitLookback, splitOpenFileCost);
           })
           .flatMap(Streams::stream)
