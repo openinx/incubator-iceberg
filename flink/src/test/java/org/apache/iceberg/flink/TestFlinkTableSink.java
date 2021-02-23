@@ -287,6 +287,49 @@ public class TestFlinkTableSink extends FlinkCatalogTestBase {
     sql("DROP TABLE IF EXISTS %s.%s", flinkDatabase, tableName);
   }
 
+  @Test
+  public void testAutoCompact() throws Exception {
+    String tableName = "test_auto_compact";
+
+    Map<String, String> tableProps = ImmutableMap.of(
+        TableProperties.DEFAULT_FILE_FORMAT, format.name(),
+        TableProperties.FLINK_AUTO_COMPACT_ENABLED, String.valueOf(true)
+    );
+
+    sql("CREATE TABLE %s(id INT, data VARCHAR) PARTITIONED BY (data) with %s",
+        tableName, toWithClause(tableProps));
+
+    // Insert data set.
+    sql("INSERT INTO %s VALUES " +
+        "(1, 'aaa'), (1, 'bbb'), (1, 'ccc'), " +
+        "(2, 'aaa'), (2, 'bbb'), (2, 'ccc'), " +
+        "(3, 'aaa'), (3, 'bbb'), (3, 'ccc')", tableName);
+
+    Table table = validationCatalog.loadTable(TableIdentifier.of(icebergNamespace, tableName));
+    SimpleDataUtil.assertTableRecords(table, ImmutableList.of(
+        SimpleDataUtil.createRecord(1, "aaa"),
+        SimpleDataUtil.createRecord(1, "bbb"),
+        SimpleDataUtil.createRecord(1, "ccc"),
+        SimpleDataUtil.createRecord(2, "aaa"),
+        SimpleDataUtil.createRecord(2, "bbb"),
+        SimpleDataUtil.createRecord(2, "ccc"),
+        SimpleDataUtil.createRecord(3, "aaa"),
+        SimpleDataUtil.createRecord(3, "bbb"),
+        SimpleDataUtil.createRecord(3, "ccc")
+    ));
+
+    if (isStreamingJob) {
+      Assert.assertEquals("There should be only 1 data file in partition 'aaa'", 1,
+          partitionFiles(tableName, "aaa").size());
+      Assert.assertEquals("There should be only 1 data file in partition 'bbb'", 1,
+          partitionFiles(tableName, "bbb").size());
+      Assert.assertEquals("There should be only 1 data file in partition 'ccc'", 1,
+          partitionFiles(tableName, "ccc").size());
+    }
+
+    sql("DROP TABLE IF EXISTS %s.%s", flinkDatabase, tableName);
+  }
+
   private List<Path> partitionFiles(String table, String partition) throws IOException {
     String databasePath = Joiner.on("/").join(baseNamespace.levels()) + "/" + DATABASE;
     if (!isHadoopCatalog) {

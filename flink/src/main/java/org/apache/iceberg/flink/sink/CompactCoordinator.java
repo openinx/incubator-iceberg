@@ -120,8 +120,7 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
     int subTaskId = getRuntimeContext().getIndexOfThisSubtask();
     int attemptId = getRuntimeContext().getAttemptNumber();
     // Use the <Job-ID>-compactor as the identifier because we don't want to overwrite the committer's manifests.
-    String flinkJobId = getContainingTask().getEnvironment().getJobID().toString();
-    String identifier = String.format("%s-compactor", flinkJobId);
+    String identifier = String.format("%s-compactor", getContainingTask().getEnvironment().getJobID());
     this.manifestOutputFileFactory = FlinkManifestUtil.createOutputFileFactory(table, identifier, subTaskId, attemptId);
 
     this.maxEmittedCheckpointId = -1L;
@@ -293,7 +292,8 @@ class CompactCoordinator extends AbstractStreamOperator<CombinedScanTask>
       }
 
       // Convert the data files to FileScanTasks.
-      Iterable<FileScanTask> scanTasks = Arrays.stream(deltaManifests.writeResult(table.io()).dataFiles())
+      WriteResult result = deltaManifests.writeResult(table.io());
+      Iterable<FileScanTask> scanTasks = Arrays.stream(result.dataFiles())
           .map(dataFile -> new BaseFileScanTask(dataFile, null, schemaString, specString, ignored))
           .collect(Collectors.toList());
 

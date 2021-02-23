@@ -31,29 +31,39 @@ import org.apache.flink.table.sinks.PartitionableTableSink;
 import org.apache.flink.table.sinks.TableSink;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.util.Preconditions;
+import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.flink.sink.FlinkSink;
+import org.apache.iceberg.util.PropertyUtil;
 
 public class IcebergTableSink implements AppendStreamTableSink<RowData>, OverwritableTableSink, PartitionableTableSink {
   private final boolean isBounded;
   private final TableLoader tableLoader;
   private final TableSchema tableSchema;
+  private final Map<String, String> props;
 
   private boolean overwrite = false;
 
-  public IcebergTableSink(boolean isBounded, TableLoader tableLoader, TableSchema tableSchema) {
+  public IcebergTableSink(boolean isBounded, TableLoader tableLoader, TableSchema tableSchema,
+                          Map<String, String> props) {
     this.isBounded = isBounded;
     this.tableLoader = tableLoader;
     this.tableSchema = tableSchema;
+    this.props = props;
   }
 
   @Override
   public DataStreamSink<?> consumeDataStream(DataStream<RowData> dataStream) {
     Preconditions.checkState(!overwrite || isBounded, "Unbounded data stream doesn't support overwrite operation.");
 
+    boolean autoCompact = PropertyUtil.propertyAsBoolean(props,
+        TableProperties.FLINK_AUTO_COMPACT_ENABLED,
+        TableProperties.FLINK_AUTO_COMPACT_ENABLED_DEFAULT);
+
     return FlinkSink.forRowData(dataStream)
         .tableLoader(tableLoader)
         .tableSchema(tableSchema)
         .overwrite(overwrite)
+        .autoCompact(autoCompact)
         .build();
   }
 
