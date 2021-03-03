@@ -84,6 +84,18 @@ public class AliyunProperties implements Serializable {
   public static final String OSS_MULTIPART_THRESHOLD_SIZE = "oss.multipart.threshold.size-bytes";
   public static final long OSS_MULTIPART_THRESHOLD_SIZE_DEFAULT = 5 * 1024 * 1024 * 1024L;
 
+  /**
+   * The ID of the Data Lake Format where the tables reside.
+   * If none is provided, DLF automatically uses the caller's aliyun account ID by default.
+   * <p>
+   * For more details, see https://help.aliyun.com/document_detail/197150.html
+   */
+  public static final String DLF_CATALOG_ID = "dlf.id";
+
+  public static final String DLF_ENDPOINT = "dlf.endpoint";
+
+  public static final String DLF_REGION_ID = "dlf.region-id";
+
   private final String ossEndpoint;
   private final String ossAccessKeyId;
   private final String ossAccessKeySecret;
@@ -91,6 +103,9 @@ public class AliyunProperties implements Serializable {
   private final long ossMultiPartSize;
   private final String ossStagingDirectory;
   private final long ossMultipartThresholdSize;
+  private final String dlfCatalogId;
+  private final String dlfEndpoint;
+  private final String dlfRegionId;
 
   public AliyunProperties() {
     this(ImmutableMap.of());
@@ -133,6 +148,15 @@ public class AliyunProperties implements Serializable {
         "%s must be positive, the recommend value is 5GB.", OSS_MULTIPART_THRESHOLD_SIZE);
     Preconditions.checkArgument(ossMultipartThresholdSize >= ossMultiPartSize,
         "%s must be not less than %s (value: %s)", OSS_MULTIPART_THRESHOLD_SIZE, OSS_MULTIPART_SIZE, ossMultiPartSize);
+
+    // Data Lake Format catalog id.
+    this.dlfCatalogId = properties.get(DLF_CATALOG_ID);
+
+    // Data Lake Format endpoint address.
+    this.dlfEndpoint = properties.get(DLF_ENDPOINT);
+
+    // Data Lake Format region id.
+    this.dlfRegionId = properties.get(DLF_REGION_ID);
   }
 
   public String ossEndpoint() {
@@ -161,5 +185,17 @@ public class AliyunProperties implements Serializable {
 
   public long ossMultipartThresholdSize() {
     return ossMultipartThresholdSize;
+  }
+
+  public String dlfCatalogId() {
+    return dlfCatalogId;
+  }
+
+  public String dlfEndpoint() {
+    return dlfEndpoint;
+  }
+
+  public String dlfRegionId() {
+    return dlfRegionId;
   }
 }

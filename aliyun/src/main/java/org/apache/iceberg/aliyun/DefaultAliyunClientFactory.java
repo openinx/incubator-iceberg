@@ -19,8 +19,10 @@
 
 package org.apache.iceberg.aliyun;
 
+import com.aliyun.datalake20200710.Client;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
+import com.aliyun.teaopenapi.models.Config;
 import java.util.Map;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 
@@ -37,6 +39,27 @@ public class DefaultAliyunClientFactory implements AliyunClientFactory {
         aliyunProperties.ossEndpoint(),
         aliyunProperties.ossAccessKeyId(),
         aliyunProperties.ossAccessKeySecret());
+  }
+
+  @Override
+  public Client dlfClient() {
+    Preconditions.checkNotNull(aliyunProperties,
+        "Cannot create aliyun DLF client before initializing the AliyunClientFactory.");
+
+    Config authConfig = new Config();
+
+    /* TODO check whether should we use the oss auth configurations. */
+    authConfig.setAccessKeyId(aliyunProperties.ossAccessKeyId());
+    authConfig.setAccessKeySecret(aliyunProperties.ossAccessKeySecret());
+    authConfig.setType("access_key");
+    authConfig.setEndpoint(aliyunProperties.dlfEndpoint());
+    authConfig.setRegionId(aliyunProperties.dlfRegionId());
+
+    try {
+      return new Client(authConfig);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
   }
 
   @Override

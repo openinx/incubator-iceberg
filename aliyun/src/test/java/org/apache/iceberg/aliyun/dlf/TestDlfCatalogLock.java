@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.iceberg.aws.glue;
+package org.apache.iceberg.aliyun.dlf;
 
 import java.util.List;
 import java.util.UUID;
@@ -32,41 +32,13 @@ import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.Table;
-import org.apache.iceberg.aws.AwsProperties;
-import org.apache.iceberg.aws.s3.S3FileIO;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.relocated.com.google.common.util.concurrent.MoreExecutors;
 import org.apache.iceberg.util.Tasks;
-import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.BeforeClass;
 import org.junit.Test;
-import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.dynamodb.model.DeleteTableRequest;
 
-public class GlueCatalogLockTest extends GlueTestBase {
-
-  private static String lockTableName;
-  private static DynamoDbClient dynamo;
-
-  @BeforeClass
-  public static void beforeClass() {
-    GlueTestBase.beforeClass();
-    String testBucketPath = "s3://" + testBucketName + "/" + testPathPrefix;
-    lockTableName = getRandomName();
-    S3FileIO fileIO = new S3FileIO(clientFactory::s3);
-    glueCatalog = new GlueCatalog();
-    AwsProperties awsProperties = new AwsProperties();
-    dynamo = clientFactory.dynamo();
-    glueCatalog.initialize(catalogName, testBucketPath, awsProperties, glue,
-        new DynamoLockManager(dynamo, lockTableName), fileIO);
-  }
-
-  @AfterClass
-  public static void afterClass() {
-    GlueTestBase.afterClass();
-    dynamo.deleteTable(DeleteTableRequest.builder().tableName(lockTableName).build());
-  }
+public class TestDlfCatalogLock extends DlfCatalogTestBase {
 
   @Test
   public void testParallelCommit_multiThreadSingleCommit() {
@@ -74,7 +46,7 @@ public class GlueCatalogLockTest extends GlueTestBase {
     String namespace = createNamespace();
     String tableName = getRandomName();
     createTable(namespace, tableName);
-    Table table = glueCatalog.loadTable(TableIdentifier.of(namespace, tableName));
+    Table table = dlfCatalog.loadTable(TableIdentifier.of(namespace, tableName));
     DataFile dataFile = DataFiles.builder(partitionSpec)
         .withPath("/path/to/data-a.parquet")
         .withFileSizeInBytes(1)
@@ -104,7 +76,7 @@ public class GlueCatalogLockTest extends GlueTestBase {
     String namespace = createNamespace();
     String tableName = getRandomName();
     createTable(namespace, tableName);
-    Table table = glueCatalog.loadTable(TableIdentifier.of(namespace, tableName));
+    Table table = dlfCatalog.loadTable(TableIdentifier.of(namespace, tableName));
     String fileName = UUID.randomUUID().toString();
     DataFile file = DataFiles.builder(table.spec())
         .withPath(FileFormat.PARQUET.addExtension(fileName))
