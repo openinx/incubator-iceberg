@@ -51,7 +51,8 @@ public class FlinkTableFactory implements TableSinkFactory<RowData>, TableSource
     ObjectPath objectPath = context.getObjectIdentifier().toObjectPath();
     TableLoader tableLoader = createTableLoader(objectPath);
     TableSchema tableSchema = TableSchemaUtils.getPhysicalSchema(context.getTable().getSchema());
-    return new IcebergTableSink(context.isBounded(), tableLoader, tableSchema);
+    Map<String, String> props = context.getTable().toProperties();
+    return new IcebergTableSink(context.isBounded(), tableLoader, tableSchema, props);
   }
 
   @Override
