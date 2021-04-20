@@ -136,7 +136,7 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
 
   @Override
   protected TableOperations newTableOps(TableIdentifier tableIdentifier) {
-    return new DlfTableOperations(dlfClient, catalogName, aliyunProperties, fileIO, tableIdentifier);
+    return new DlfTableOperations(dlfClient, warehousePath, catalogName, aliyunProperties, fileIO, tableIdentifier);
   }
 
   @Override

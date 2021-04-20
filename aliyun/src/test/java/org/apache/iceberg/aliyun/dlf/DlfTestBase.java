@@ -51,6 +51,7 @@ public class DlfTestBase {
   private static final String testBucketName = AliyunTestUtility.testBucketName();
   private static final String catalogName = "dlf";
   private static final String testPathPrefix = getRandomName();
+  static final String warehousePath = String.format("oss://%s/%s", testBucketName, testPathPrefix);
   static final List<String> namespaces = Lists.newArrayList();
 
   private static final AliyunClientFactory clientFactory = AliyunClientFactory.load(AliyunTestUtility.toProps());
@@ -67,10 +68,9 @@ public class DlfTestBase {
   @BeforeClass
   public static void beforeClass() {
     LOG.info("Initialize the data lake format catalog.");
-    String testBucketPath = String.format("oss://%s/%s", testBucketName, testPathPrefix);
     OSSFileIO fileIO = new OSSFileIO(clientFactory::oss);
 
-    dlfCatalog.initialize(catalogName, testBucketPath, aliyunProperties, dlfClient, fileIO);
+    dlfCatalog.initialize(catalogName, warehousePath, aliyunProperties, dlfClient, fileIO);
   }
 
   @AfterClass
@@ -100,7 +100,12 @@ public class DlfTestBase {
   }
 
   static String getRandomName() {
-    return UUID.randomUUID().toString().replace("-", "");
+    String uuid = UUID.randomUUID().toString().replace("-", "");
+    char ch = uuid.charAt(0);
+    if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+      return uuid;
+    }
+    return String.format("a%s", uuid.substring(1));
   }
 
   static String createNamespace() {

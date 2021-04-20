@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.aliyun.dlf;
 
+import com.aliyun.datalake20200710.models.FieldSchema;
 import com.aliyun.datalake20200710.models.GetTableRequest;
 import com.aliyun.datalake20200710.models.GetTableResponse;
 import com.aliyun.datalake20200710.models.Table;
@@ -59,7 +60,9 @@ public class TestDlfCatalogTable extends DlfTestBase {
     Assert.assertEquals(BaseMetastoreTableOperations.ICEBERG_TABLE_TYPE_VALUE.toUpperCase(Locale.ENGLISH),
         table.getParameters().get(BaseMetastoreTableOperations.TABLE_TYPE_PROP));
     Assert.assertTrue(table.getParameters().containsKey(BaseMetastoreTableOperations.METADATA_LOCATION_PROP));
-    // TODO Assert more table informations ? such as table columns, partition keys ?
+    Assert.assertEquals(warehousePath, table.getSd().getLocation());
+    assertFieldSchemaList(IcebergToDlfConverter.toFieldSchemaList(schema), table.getSd().getCols());
+    assertFieldSchemaList(IcebergToDlfConverter.toFieldSchemaList(partitionSpec), table.getPartitionKeys());
 
     // verify metadata file exists in OSS
     String metaLocation = table.getParameters().get(BaseMetastoreTableOperations.METADATA_LOCATION_PROP);
@@ -69,6 +72,24 @@ public class TestDlfCatalogTable extends DlfTestBase {
     org.apache.iceberg.Table iTable = dlfCatalog.loadTable(TableIdentifier.of(namespace, tableName));
     Assert.assertEquals(partitionSpec, iTable.spec());
     Assert.assertEquals(schema.asStruct(), iTable.schema().asStruct());
+  }
+
+  private void assertFieldSchemaList(List<FieldSchema> expected, List<FieldSchema> actual) {
+    if (expected == null || actual == null) {
+      Assert.assertEquals("Both should be null.", expected, actual);
+    }
+    Assert.assertEquals("Should have the same length", expected.size(), actual.size());
+    for (int i = 0; i < expected.size(); i++) {
+      FieldSchema schema1 = expected.get(i);
+      FieldSchema schema2 = actual.get(i);
+      if (schema1 == null || schema2 == null) {
+        Assert.assertEquals("Both should be null", schema1, schema2);
+      }
+      Assert.assertEquals("Should have the same name", schema1.getName(), schema2.getName());
+      Assert.assertEquals("Should have the same comment", schema1.getComment(), schema2.getComment());
+      Assert.assertEquals("Should have the same type", schema1.getType(), schema2.getType());
+      Assert.assertEquals("Should have the same parameters", schema1.getParameters(), schema2.getParameters());
+    }
   }
 
   @Test

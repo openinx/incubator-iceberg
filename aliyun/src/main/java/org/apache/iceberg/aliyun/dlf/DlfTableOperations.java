@@ -26,6 +26,7 @@ import com.aliyun.datalake20200710.models.CreateTableRequest;
 import com.aliyun.datalake20200710.models.GetTableRequest;
 import com.aliyun.datalake20200710.models.LockObj;
 import com.aliyun.datalake20200710.models.LockStatus;
+import com.aliyun.datalake20200710.models.StorageDescriptor;
 import com.aliyun.datalake20200710.models.Table;
 import com.aliyun.datalake20200710.models.TableInput;
 import com.aliyun.datalake20200710.models.UnLockRequest;
@@ -37,6 +38,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.iceberg.BaseMetastoreTableOperations;
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.aliyun.AliyunProperties;
 import org.apache.iceberg.catalog.TableIdentifier;
@@ -61,6 +64,7 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
   private static final String METASTORE_LOCK_ID = "metastore-lock-id";
 
   private final Client dlfClient;
+  private final String warehousePath;
   private final String catalogName;
   private final AliyunProperties aliyunProperties;
   private final FileIO io;
@@ -72,11 +76,13 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
   private final ThreadLocal<Long> currentLockId = new ThreadLocal<>();
 
   DlfTableOperations(Client dlfClient,
+                     String warehousePath,
                      String catalogName,
                      AliyunProperties aliyunProperties,
                      FileIO io,
                      TableIdentifier tableIdentifier) {
     this.dlfClient = dlfClient;
+    this.warehousePath = warehousePath;
     this.catalogName = catalogName;
     this.aliyunProperties = aliyunProperties;
     this.io = io;
@@ -118,16 +124,15 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
     String newMetadataLocation = writeNewMetadata(metadata, currentVersion() + 1);
     CommitStatus commitStatus = CommitStatus.FAILURE;
 
-    Long lockId = null;
     try {
-      lockId = lock(newMetadataLocation);
+      Long lockId = lock(newMetadataLocation);
       currentLockId.set(lockId);
 
       Table dlfTable = getDlfTable();
       checkMetadataLocation(dlfTable, base);
 
       Map<String, String> properties = prepareProperties(dlfTable, newMetadataLocation);
-      persistDLFTable(lockId, dlfTable, properties);
+      persistDLFTable(metadata.schema(), metadata.spec(), lockId, dlfTable, properties);
       commitStatus = CommitStatus.SUCCESS;
 
     } catch (ConcurrentModificationException e) {
@@ -217,14 +222,18 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
     return properties;
   }
 
-  void persistDLFTable(Long lockId, Table dlfTable, Map<String, String> parameters) {
-    // TODO check whether should we fill all the related table information (such as columns, partition specs) so that
-    // TODO people could see their table schema in aliyun web console.
+  void persistDLFTable(Schema schema, PartitionSpec spec, Long lockId, Table dlfTable, Map<String, String> parameters) {
+    StorageDescriptor storageDescriptor = new StorageDescriptor()
+        .setLocation(warehousePath)
+        .setCols(IcebergToDlfConverter.toFieldSchemaList(schema));
+
     TableInput tableInput = new TableInput()
         .setDatabaseName(databaseName)
         .setTableType(DLF_EXTERNAL_TABLE_TYPE)
         .setTableName(tableName)
-        .setParameters(parameters);
+        .setParameters(parameters)
+        .setSd(storageDescriptor)
+        .setPartitionKeys(IcebergToDlfConverter.toFieldSchemaList(spec));
 
     try {
       if (dlfTable != null) {

@@ -27,6 +27,8 @@ import java.util.Map;
 import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.BaseMetastoreTableOperations;
 import org.apache.iceberg.HasTableOperations;
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.aliyun.oss.OSSURI;
@@ -183,11 +185,13 @@ public class DlfCatalogCommitFailureTest extends DlfTestBase {
     Mockito.doAnswer(i -> {
       Object[] args = i.getArguments();
 
-      Long lockId = (Long) args[0];
-      com.aliyun.datalake20200710.models.Table dlfTable = (com.aliyun.datalake20200710.models.Table) args[1];
-      Map<String, String> mapProperties = (Map<String, String>) args[2];
+      Schema schema = (Schema) args[0];
+      PartitionSpec spec = (PartitionSpec) args[1];
+      Long lockId = (Long) args[2];
+      com.aliyun.datalake20200710.models.Table dlfTable = (com.aliyun.datalake20200710.models.Table) args[3];
+      Map<String, String> mapProperties = (Map<String, String>) args[4];
 
-      realOps.persistDLFTable(lockId, dlfTable, mapProperties);
+      realOps.persistDLFTable(schema, spec, lockId, dlfTable, mapProperties);
 
       // new metadata location is stored in map property, and used for locking
       String newMetadataLocation = mapProperties.get(BaseMetastoreTableOperations.METADATA_LOCATION_PROP);
@@ -198,7 +202,11 @@ public class DlfCatalogCommitFailureTest extends DlfTestBase {
       table.refresh();
       table.updateSchema().addColumn("newCol", Types.IntegerType.get()).commit();
       throw new RuntimeException("Datacenter on fire");
-    }).when(spyOperations).persistDLFTable(Matchers.anyLong(), Matchers.any(), Matchers.anyMap());
+    }).when(spyOperations).persistDLFTable(Matchers.any(),
+        Matchers.any(),
+        Matchers.anyLong(),
+        Matchers.any(),
+        Matchers.anyMap());
   }
 
   private Table setupTable() {
@@ -222,16 +230,23 @@ public class DlfCatalogCommitFailureTest extends DlfTestBase {
   private void commitAndThrowException(DlfTableOperations realOps, DlfTableOperations spyOps) {
     Mockito.doAnswer(i -> {
       Object[] args = i.getArguments();
-      Long lockId = (Long) args[0];
-      com.aliyun.datalake20200710.models.Table table = (com.aliyun.datalake20200710.models.Table) args[1];
-      Map<String, String> parameters = (Map<String, String>) args[2];
+
+      Schema schema = (Schema) args[0];
+      PartitionSpec spec = (PartitionSpec) args[1];
+      Long lockId = (Long) args[2];
+      com.aliyun.datalake20200710.models.Table table = (com.aliyun.datalake20200710.models.Table) args[3];
+      Map<String, String> parameters = (Map<String, String>) args[4];
 
       realOps.persistDLFTable(
+          schema,
+          spec,
           lockId,
           table,
           parameters);
       throw new RuntimeException("Datacenter on fire");
     }).when(spyOps).persistDLFTable(
+        Matchers.any(),
+        Matchers.any(),
         Matchers.anyLong(),
         Matchers.any(),
         Matchers.anyMap()
@@ -244,7 +259,12 @@ public class DlfCatalogCommitFailureTest extends DlfTestBase {
 
   private void failCommitAndThrowException(DlfTableOperations spyOps, Exception exceptionToThrow) {
     Mockito.doThrow(exceptionToThrow)
-        .when(spyOps).persistDLFTable(Matchers.anyLong(), Matchers.any(), Matchers.anyMap());
+        .when(spyOps).persistDLFTable(
+        Matchers.any(),
+        Matchers.any(),
+        Matchers.anyLong(),
+        Matchers.any(),
+        Matchers.anyMap());
   }
 
   private void breakFallbackCatalogCommitCheck(DlfTableOperations spyOperations) {
