@@ -25,7 +25,9 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.model.ListObjectsRequest;
 import com.aliyun.oss.model.OSSObjectSummary;
 import com.aliyun.oss.model.ObjectListing;
+import com.aliyun.tea.TeaException;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
@@ -75,10 +77,16 @@ public class DlfTestBase {
   public static void afterClass() throws Exception {
     // Clean all created namespaces.
     for (String namespace : namespaces) {
-      dlfClient.deleteDatabase(new DeleteDatabaseRequest()
-          .setCascade(true)
-          .setCatalogId(aliyunProperties.dlfCatalogId())
-          .setName(namespace));
+      try {
+        dlfClient.deleteDatabase(new DeleteDatabaseRequest()
+            .setCascade(true)
+            .setCatalogId(aliyunProperties.dlfCatalogId())
+            .setName(namespace));
+      } catch (TeaException e) {
+        if (!Objects.equals(DlfCatalog.NO_SUCH_OBJECT, e.getCode())) {
+          throw e;
+        }
+      }
     }
 
     // Clean all objects from buckets.

@@ -47,6 +47,14 @@ public class AliyunTestUtility {
     return System.getenv("ALIYUN_TEST_OSS_ENDPOINT");
   }
 
+  public static String testOssKeyPrefix() {
+    return System.getenv("ALIYUN_TEST_OSS_KEY_PREFIX");
+  }
+
+  public static String testOssTestRuleClass() {
+    return System.getenv("ALIYUN_TEST_OSS_TEST_RULE_CLASS");
+  }
+
   public static String testDlfCatalogId() {
     return System.getenv("ALIYUN_TEST_DLF_CATALOG_ID");
   }
@@ -63,8 +71,8 @@ public class AliyunTestUtility {
     ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
 
     builder.put(AliyunProperties.OSS_ENDPOINT, testOssEndpoint());
-    builder.put(AliyunProperties.OSS_ACCESS_KEY_ID, testAccessKeyId());
-    builder.put(AliyunProperties.OSS_ACCESS_KEY_SECRET, testAccessKeySecret());
+    builder.put(AliyunProperties.ACCESS_KEY_ID, testAccessKeyId());
+    builder.put(AliyunProperties.ACCESS_KEY_SECRET, testAccessKeySecret());
     builder.put(AliyunProperties.DLF_CATALOG_ID, testDlfCatalogId());
     builder.put(AliyunProperties.DLF_ENDPOINT, testDlfEndpoint());
     builder.put(AliyunProperties.DLF_REGION_ID, testDlfRegionId());

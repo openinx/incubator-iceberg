@@ -36,23 +36,23 @@ public class AliyunProperties implements Serializable {
   public static final String OSS_ENDPOINT = "oss.endpoint";
 
   /**
-   * OSS uses an AccessKey pair, which includes an AccessKey ID and an AccessKey secret to implement symmetric
+   * Aliyun uses an AccessKey pair, which includes an AccessKey ID and an AccessKey secret to implement symmetric
    * encryption and verify the identity of a requester. The AccessKey ID is used to identify a user.
    * <p>
    * For more information about how to obtain an AccessKey pair, see:
    * https://www.alibabacloud.com/help/doc-detail/53045.htm
    */
-  public static final String OSS_ACCESS_KEY_ID = "oss.access.key.id";
+  public static final String ACCESS_KEY_ID = "access.key.id";
 
   /**
-   * OSS uses an AccessKey pair, which includes an AccessKey ID and an AccessKey secret to implement symmetric
+   * Aliyun uses an AccessKey pair, which includes an AccessKey ID and an AccessKey secret to implement symmetric
    * encryption and verify the identity of a requester.  The AccessKey secret is used to encrypt and verify the
    * signature string.
    * <p>
    * For more information about how to obtain an AccessKey pair, see:
    * https://www.alibabacloud.com/help/doc-detail/53045.htm
    */
-  public static final String OSS_ACCESS_KEY_SECRET = "oss.access.key.secret";
+  public static final String ACCESS_KEY_SECRET = "access.key.secret";
 
   /**
    * Number of threads to use for uploading parts to OSS (shared pool across all output streams),
@@ -97,8 +97,8 @@ public class AliyunProperties implements Serializable {
   public static final String DLF_REGION_ID = "dlf.region-id";
 
   private final String ossEndpoint;
-  private final String ossAccessKeyId;
-  private final String ossAccessKeySecret;
+  private final String accessKeyId;
+  private final String accessKeySecret;
   private final int ossMultipartUploadThreads;
   private final long ossMultiPartSize;
   private final String ossStagingDirectory;
@@ -116,8 +116,8 @@ public class AliyunProperties implements Serializable {
 
     // OSS endpoint, accessKeyId, accessKeySecret.
     this.ossEndpoint = properties.get(OSS_ENDPOINT);
-    this.ossAccessKeyId = properties.get(OSS_ACCESS_KEY_ID);
-    this.ossAccessKeySecret = properties.get(OSS_ACCESS_KEY_SECRET);
+    this.accessKeyId = properties.get(ACCESS_KEY_ID);
+    this.accessKeySecret = properties.get(ACCESS_KEY_SECRET);
 
     // OSS multipart upload threads.
     this.ossMultipartUploadThreads = PropertyUtil.propertyAsInt(properties, OSS_MULTIPART_UPLOAD_THREADS,
@@ -163,12 +163,12 @@ public class AliyunProperties implements Serializable {
     return ossEndpoint;
   }
 
-  public String ossAccessKeyId() {
-    return ossAccessKeyId;
+  public String accessKeyId() {
+    return accessKeyId;
   }
 
-  public String ossAccessKeySecret() {
-    return ossAccessKeySecret;
+  public String accessKeySecret() {
+    return accessKeySecret;
   }
 
   public int ossMultipartUploadThreads() {

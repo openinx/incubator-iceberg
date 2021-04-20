@@ -37,8 +37,8 @@ public class DefaultAliyunClientFactory implements AliyunClientFactory {
 
     return new OSSClientBuilder().build(
         aliyunProperties.ossEndpoint(),
-        aliyunProperties.ossAccessKeyId(),
-        aliyunProperties.ossAccessKeySecret());
+        aliyunProperties.accessKeyId(),
+        aliyunProperties.accessKeySecret());
   }
 
   @Override
@@ -49,8 +49,8 @@ public class DefaultAliyunClientFactory implements AliyunClientFactory {
     Config authConfig = new Config();
 
     /* TODO check whether should we use the oss auth configurations. */
-    authConfig.setAccessKeyId(aliyunProperties.ossAccessKeyId());
-    authConfig.setAccessKeySecret(aliyunProperties.ossAccessKeySecret());
+    authConfig.setAccessKeyId(aliyunProperties.accessKeyId());
+    authConfig.setAccessKeySecret(aliyunProperties.accessKeySecret());
     authConfig.setType("access_key");
     authConfig.setEndpoint(aliyunProperties.dlfEndpoint());
     authConfig.setRegionId(aliyunProperties.dlfRegionId());
