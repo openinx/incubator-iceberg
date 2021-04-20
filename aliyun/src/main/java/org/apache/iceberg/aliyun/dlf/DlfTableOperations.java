@@ -44,6 +44,7 @@ import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.exceptions.CommitFailedException;
 import org.apache.iceberg.exceptions.CommitStateUnknownException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
+import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
@@ -53,6 +54,8 @@ import org.slf4j.LoggerFactory;
 
 class DlfTableOperations extends BaseMetastoreTableOperations {
   private static final Logger LOG = LoggerFactory.getLogger(DlfTableOperations.class);
+  private static final RuntimeOptions RUNTIME_OPTIONS = new RuntimeOptions();
+
   private static final String DLF_EXTERNAL_TABLE_TYPE = "EXTERNAL_TABLE";
   private static final String LOCK_STATE_ACQUIRED = "ACQUIRED";
   private static final String METASTORE_LOCK_ID = "metastore-lock-id";
@@ -65,6 +68,8 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
   private final String databaseName;
   private final String tableName;
   private final String fullTableName;
+
+  private final ThreadLocal<Long> currentLockId = new ThreadLocal<>();
 
   DlfTableOperations(Client dlfClient,
                      String catalogName,
@@ -116,6 +121,7 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
     Long lockId = null;
     try {
       lockId = lock(newMetadataLocation);
+      currentLockId.set(lockId);
 
       Table dlfTable = getDlfTable();
       checkMetadataLocation(dlfTable, base);
@@ -141,7 +147,7 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
           throw new CommitStateUnknownException(persistFailure);
       }
     } finally {
-      cleanupMetadataAndUnlock(lockId, commitStatus, newMetadataLocation);
+      cleanupMetadataAndUnlock(commitStatus, newMetadataLocation);
     }
   }
 
@@ -189,7 +195,12 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
           .setDatabaseName(databaseName)
           .setTableName(tableName);
 
-      return dlfClient.getTable(request).getBody().getTable();
+      if (currentLockId.get() != null) {
+        Map<String, String> headers = ImmutableMap.of(METASTORE_LOCK_ID, currentLockId.get().toString());
+        return dlfClient.getTableWithOptions(request, headers, RUNTIME_OPTIONS).getBody().getTable();
+      } else {
+        return dlfClient.getTable(request).getBody().getTable();
+      }
     } catch (Exception e) {
       return null;
     }
@@ -206,7 +217,7 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
     return properties;
   }
 
-  private void persistDLFTable(Long lockId, Table dlfTable, Map<String, String> parameters) {
+  void persistDLFTable(Long lockId, Table dlfTable, Map<String, String> parameters) {
     // TODO check whether should we fill all the related table information (such as columns, partition specs) so that
     // TODO people could see their table schema in aliyun web console.
     TableInput tableInput = new TableInput()
@@ -228,7 +239,7 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
 
         // Update DLF table with acquired lock ID.
         Map<String, String> headers = ImmutableMap.of(METASTORE_LOCK_ID, lockId.toString());
-        dlfClient.updateTableWithOptions(request, headers, new RuntimeOptions());
+        dlfClient.updateTableWithOptions(request, headers, RUNTIME_OPTIONS);
 
       } else {
         LOG.info("Committing new DLF table: {}", tableName());
@@ -240,8 +251,19 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
 
         // Create DLF table with the acquired lock ID.
         Map<String, String> headers = ImmutableMap.of(METASTORE_LOCK_ID, lockId.toString());
-        dlfClient.createTableWithOptions(request, headers, new RuntimeOptions());
+        dlfClient.createTableWithOptions(request, headers, RUNTIME_OPTIONS);
       }
+
+      // As DLF will only commit the whole txn into database until released the lockId, so in theory we could see
+      // correct latest table status within the lockId context. In other words, if we don't attach the lockId when
+      // reading the table from DLF we won't be able to read the latest status. This is used to check the semantics.
+      Table table = getDlfTable();
+      ValidationException.check(table != null, "The newly persisted table shouldn't be null.");
+      String location = parameters.get(METADATA_LOCATION_PROP);
+      String newLocation = table.getParameters().get(METADATA_LOCATION_PROP);
+      ValidationException.check(Objects.equals(location, newLocation),
+          "The newly persisted table should have the expected location %s but was %s", location, newLocation);
+
     } catch (TeaException e) {
       if (Objects.equals(e.getCode(), DlfCatalog.ALREADY_EXISTS)) {
         throw new AlreadyExistsException(e,
@@ -253,7 +275,7 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
     }
   }
 
-  void cleanupMetadataAndUnlock(Long lockId, CommitStatus commitStatus, String metadataLocation) {
+  void cleanupMetadataAndUnlock(CommitStatus commitStatus, String metadataLocation) {
     try {
       if (commitStatus == CommitStatus.FAILURE) {
         // if anything went wrong, clean up the uncommitted metadata file
@@ -263,8 +285,10 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
       LOG.error("Fail to cleanup metadata file at {}", metadataLocation, e);
       throw e;
     } finally {
+      Long lockId = currentLockId.get();
       if (lockId != null) {
         unlock(lockId);
+        currentLockId.set(null);
       }
     }
   }

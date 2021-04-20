@@ -37,7 +37,7 @@ import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.junit.Assert;
 import org.junit.Test;
 
-public class TestDlfCatalogNamespace extends DlfCatalogTestBase {
+public class TestDlfCatalogNamespace extends DlfTestBase {
 
   @Test
   public void testCreateNamespace() throws Exception {

@@ -41,7 +41,7 @@ import org.apache.iceberg.exceptions.NoSuchTableException;
 import org.junit.Assert;
 import org.junit.Test;
 
-public class TestDlfCatalogTable extends DlfCatalogTestBase {
+public class TestDlfCatalogTable extends DlfTestBase {
 
   @Test
   public void testCreateTable() throws Exception {

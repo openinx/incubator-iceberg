@@ -43,8 +43,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @SuppressWarnings({"VisibilityModifier", "HideUtilityClassConstructor"})
-public class DlfCatalogTestBase {
-  private static final Logger LOG = LoggerFactory.getLogger(DlfCatalogTestBase.class);
+public class DlfTestBase {
+  private static final Logger LOG = LoggerFactory.getLogger(DlfTestBase.class);
 
   private static final String testBucketName = AliyunTestUtility.testBucketName();
   private static final String catalogName = "dlf";

@@ -38,7 +38,7 @@ import org.apache.iceberg.util.Tasks;
 import org.junit.Assert;
 import org.junit.Test;
 
-public class TestDlfCatalogLock extends DlfCatalogTestBase {
+public class TestDlfCatalogLock extends DlfTestBase {
 
   @Test
   public void testParallelCommit_multiThreadSingleCommit() {
