@@ -152,13 +152,13 @@ class IcebergToDlfConverter {
       case DATE:
         return "date";
       case TIME:
-        return "timestamp"; /* TODO is it correct ? */
+        return "time";
       case TIMESTAMP:
         return "timestamp";
       case STRING:
         return "string";
       case UUID:
-        return "string"; /* TODO is it correct ? */
+        return "uuid";
       case FIXED:
         return "char";
       case BINARY:
