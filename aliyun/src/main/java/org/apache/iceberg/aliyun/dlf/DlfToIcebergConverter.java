@@ -41,6 +41,19 @@ class DlfToIcebergConverter {
   }
 
   /**
+   * Check whether the DLF table is an iceberg table or not.
+   *
+   * @param table DLF table.
+   * @return true if it's an iceberg table.
+   */
+  static boolean isDlfIcebergTable(Table table) {
+    return table.getParameters() != null &&
+        BaseMetastoreTableOperations.ICEBERG_TABLE_TYPE_VALUE.equalsIgnoreCase(
+            table.getParameters().get(BaseMetastoreTableOperations.TABLE_TYPE_PROP)
+        );
+  }
+
+  /**
    * Validate the DLF table is Iceberg table by checking its parameters
    *
    * @param table    DLF table

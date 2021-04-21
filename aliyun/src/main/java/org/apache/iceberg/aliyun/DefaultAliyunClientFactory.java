@@ -28,6 +28,8 @@ import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 
 public class DefaultAliyunClientFactory implements AliyunClientFactory {
 
+  private static final String DLF_AUTH_TYPE = "access_key";
+
   private AliyunProperties aliyunProperties;
 
   @Override
@@ -47,18 +49,16 @@ public class DefaultAliyunClientFactory implements AliyunClientFactory {
         "Cannot create aliyun DLF client before initializing the AliyunClientFactory.");
 
     Config authConfig = new Config();
-
-    /* TODO check whether should we use the oss auth configurations. */
     authConfig.setAccessKeyId(aliyunProperties.accessKeyId());
     authConfig.setAccessKeySecret(aliyunProperties.accessKeySecret());
-    authConfig.setType("access_key");
+    authConfig.setType(DLF_AUTH_TYPE);
     authConfig.setEndpoint(aliyunProperties.dlfEndpoint());
     authConfig.setRegionId(aliyunProperties.dlfRegionId());
 
     try {
       return new Client(authConfig);
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      throw new RuntimeException("Failed to initialize the DLF client", e);
     }
   }
 

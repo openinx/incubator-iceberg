@@ -90,10 +90,20 @@ public class AliyunProperties implements Serializable {
    * <p>
    * For more details, see https://help.aliyun.com/document_detail/197150.html
    */
-  public static final String DLF_CATALOG_ID = "dlf.id";
+  public static final String DLF_CATALOG_ID = "dlf.catalog-id";
 
+  /**
+   * The endpoint of Data Lake Format services.
+   * <p>
+   * For more details, see https://help.aliyun.com/document_detail/197608.html
+   */
   public static final String DLF_ENDPOINT = "dlf.endpoint";
 
+  /**
+   * The region identifier where Data Lake Format services are located.
+   * <p>
+   * For more details, see https://help.aliyun.com/document_detail/197608.html
+   */
   public static final String DLF_REGION_ID = "dlf.region-id";
 
   private final String ossEndpoint;
@@ -188,14 +198,17 @@ public class AliyunProperties implements Serializable {
   }
 
   public String dlfCatalogId() {
+    Preconditions.checkNotNull(dlfCatalogId, "Cannot set '%s' to be null.", DLF_CATALOG_ID);
     return dlfCatalogId;
   }
 
   public String dlfEndpoint() {
+    Preconditions.checkNotNull(dlfEndpoint, "Cannot set '%s' to be null.", DLF_ENDPOINT);
     return dlfEndpoint;
   }
 
   public String dlfRegionId() {
+    Preconditions.checkNotNull(dlfRegionId, "Cannot set '%s' to be null.", DLF_REGION_ID);
     return dlfRegionId;
   }
 }

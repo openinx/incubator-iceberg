@@ -25,7 +25,6 @@ import com.aliyun.datalake20200710.models.GetTableResponse;
 import com.aliyun.datalake20200710.models.Table;
 import com.aliyun.oss.model.ListObjectsRequest;
 import com.aliyun.oss.model.OSSObjectSummary;
-import com.aliyun.tea.TeaException;
 import java.util.List;
 import java.util.Locale;
 import org.apache.iceberg.AssertHelpers;
@@ -60,7 +59,7 @@ public class TestDlfCatalogTable extends DlfTestBase {
     Assert.assertEquals(BaseMetastoreTableOperations.ICEBERG_TABLE_TYPE_VALUE.toUpperCase(Locale.ENGLISH),
         table.getParameters().get(BaseMetastoreTableOperations.TABLE_TYPE_PROP));
     Assert.assertTrue(table.getParameters().containsKey(BaseMetastoreTableOperations.METADATA_LOCATION_PROP));
-    Assert.assertEquals(warehousePath, table.getSd().getLocation());
+    Assert.assertEquals(String.format("%s/%s.db/%s", warehousePath, namespace, tableName), table.getSd().getLocation());
     assertFieldSchemaList(IcebergToDlfConverter.toFieldSchemaList(schema), table.getSd().getCols());
     assertFieldSchemaList(IcebergToDlfConverter.toFieldSchemaList(partitionSpec), table.getPartitionKeys());
 
@@ -173,6 +172,36 @@ public class TestDlfCatalogTable extends DlfTestBase {
   }
 
   @Test
+  public void testRenameTable_NoSuchTable() {
+    String namespace = createNamespace();
+    String tableName = getRandomName();
+    AssertHelpers.assertThrows("Table does not exist",
+        NoSuchTableException.class,
+        "Table does not exist: ",
+        () -> dlfCatalog.loadTable(TableIdentifier.of(namespace, tableName)));
+    // Rename table.
+    String newTableName = String.format("%s_2", tableName);
+    AssertHelpers.assertThrows("Table does not exist",
+        NoSuchTableException.class,
+        "because the table does not exist in DLF",
+        () -> dlfCatalog.renameTable(
+            TableIdentifier.of(namespace, tableName),
+            TableIdentifier.of(namespace, newTableName)
+        ));
+    // Create the table.
+    createTable(namespace, tableName);
+    org.apache.iceberg.Table table = dlfCatalog.loadTable(TableIdentifier.of(namespace, tableName));
+    // Rename it again.
+    dlfCatalog.renameTable(TableIdentifier.of(namespace, tableName), TableIdentifier.of(namespace, newTableName));
+    // Load table for assert purpose.
+    org.apache.iceberg.Table renamedTable = dlfCatalog.loadTable(TableIdentifier.of(namespace, newTableName));
+    Assert.assertEquals(table.location(), renamedTable.location());
+    Assert.assertEquals(table.schema().asStruct(), renamedTable.schema().asStruct());
+    Assert.assertEquals(table.spec(), renamedTable.spec());
+    Assert.assertEquals(table.currentSnapshot(), renamedTable.currentSnapshot());
+  }
+
+  @Test
   public void testRenameTable_AlreadyExists() {
     String namespace = createNamespace();
     String tableName = createTable(namespace);
@@ -184,7 +213,7 @@ public class TestDlfCatalogTable extends DlfTestBase {
     String newTableName = tableName + "_2";
     dlfCatalog.createTable(TableIdentifier.of(namespace, newTableName), schema, partitionSpec);
     AssertHelpers.assertThrows("should fail to rename to an existing table",
-        TeaException.class,
+        AlreadyExistsException.class,
         "already exists",
         () -> dlfCatalog.renameTable(
             TableIdentifier.of(namespace, tableName),

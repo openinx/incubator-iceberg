@@ -26,6 +26,7 @@ import com.aliyun.datalake20200710.models.DeleteDatabaseRequest;
 import com.aliyun.datalake20200710.models.DeleteTableRequest;
 import com.aliyun.datalake20200710.models.GetDatabaseRequest;
 import com.aliyun.datalake20200710.models.GetDatabaseResponse;
+import com.aliyun.datalake20200710.models.GetTableRequest;
 import com.aliyun.datalake20200710.models.ListDatabasesRequest;
 import com.aliyun.datalake20200710.models.ListDatabasesResponse;
 import com.aliyun.datalake20200710.models.ListTablesRequest;
@@ -44,7 +45,6 @@ import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.BaseMetastoreCatalog;
-import org.apache.iceberg.BaseMetastoreTableOperations;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.TableMetadata;
@@ -58,6 +58,7 @@ import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.exceptions.NamespaceNotEmptyException;
 import org.apache.iceberg.exceptions.NoSuchNamespaceException;
+import org.apache.iceberg.exceptions.NoSuchTableException;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
@@ -91,24 +92,18 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
 
   @Override
   public void initialize(String name, Map<String, String> properties) {
+    AliyunClientFactory factory = AliyunClientFactory.load(properties);
     initialize(
         name,
         properties.get(CatalogProperties.WAREHOUSE_LOCATION),
-        new AliyunProperties(properties),
-        AliyunClientFactory.load(properties).dlfClient(),
-        initializeFileIO(properties)
-    );
+        factory.aliyunProperties(),
+        factory.dlfClient(),
+        initializeFileIO(properties));
   }
 
   private FileIO initializeFileIO(Map<String, String> properties) {
-    String fileIOImpl = properties.get(CatalogProperties.FILE_IO_IMPL);
-    if (fileIOImpl == null) {
-      FileIO io = new OSSFileIO();
-      io.initialize(properties);
-      return io;
-    } else {
-      return CatalogUtil.loadFileIO(fileIOImpl, properties, hadoopConf);
-    }
+    String fileIOImpl = properties.getOrDefault(CatalogProperties.FILE_IO_IMPL, OSSFileIO.class.getName());
+    return CatalogUtil.loadFileIO(fileIOImpl, properties, hadoopConf);
   }
 
   void initialize(String name,
@@ -125,36 +120,45 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
 
   private String cleanWarehousePath(String path) {
     Preconditions.checkArgument(path != null && path.length() > 0,
-        "Cannot initialize DlfCatalog because warehousePath must not be null");
-    int len = path.length();
-    if (path.charAt(len - 1) == '/') {
-      return path.substring(0, len - 1);
-    } else {
-      return path;
+        "Cannot initialize DlfCatalog because catalog property '%s' is null or empty",
+        CatalogProperties.WAREHOUSE_LOCATION);
+    String result = path;
+    while (result.endsWith("/")) {
+      result = result.substring(0, result.length() - 1);
     }
+    return result;
   }
 
   @Override
   protected TableOperations newTableOps(TableIdentifier tableIdentifier) {
-    return new DlfTableOperations(dlfClient, warehousePath, catalogName, aliyunProperties, fileIO, tableIdentifier);
+    String tableLocation = defaultWarehouseLocation(tableIdentifier);
+    return new DlfTableOperations(dlfClient, tableLocation, catalogName, aliyunProperties, fileIO, tableIdentifier);
   }
 
+  /**
+   * This method produces the same result as using a HiveCatalog.
+   * If databaseUri exists for the DLF database URI, the default location is databaseUri/tableName.
+   * If not, the default location is warehousePath/databaseName.db/tableName
+   *
+   * @param tableIdentifier table id
+   * @return default warehouse path
+   */
   @Override
   protected String defaultWarehouseLocation(TableIdentifier tableIdentifier) {
     String dbLocationUri;
 
     // Request data lake format services to get the database location uri.
     try {
-      GetDatabaseRequest request = new GetDatabaseRequest();
-      request.setCatalogId(aliyunProperties.dlfCatalogId());
-      request.setName(IcebergToDlfConverter.toDatabaseName(tableIdentifier.namespace()));
+      GetDatabaseRequest request = new GetDatabaseRequest()
+          .setCatalogId(aliyunProperties.dlfCatalogId())
+          .setName(IcebergToDlfConverter.getDatabaseName(tableIdentifier));
 
       GetDatabaseResponse response = dlfClient.getDatabase(request);
       dbLocationUri = response.getBody().getDatabase().getLocationUri();
     } catch (TeaException e) {
       throw e;
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      throw new RuntimeException("Failed to get the database from DLF services", e);
     }
 
     if (dbLocationUri != null) {
@@ -163,15 +167,8 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
 
     return String.format("%s/%s.db/%s",
         warehousePath,
-        tableIdentifier,
+        IcebergToDlfConverter.getDatabaseName(tableIdentifier),
         tableIdentifier.name());
-  }
-
-  private static boolean isDlfIcebergTable(Table table) {
-    return table.getParameters() != null &&
-        BaseMetastoreTableOperations.ICEBERG_TABLE_TYPE_VALUE.equalsIgnoreCase(
-            table.getParameters().get(BaseMetastoreTableOperations.TABLE_TYPE_PROP)
-        );
   }
 
   @Override
@@ -196,7 +193,7 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
         List<Table> tables = response.getBody().getTables();
         if (!tables.isEmpty()) {
           results.addAll(tables.stream()
-              .filter(DlfCatalog::isDlfIcebergTable)
+              .filter(DlfToIcebergConverter::isDlfIcebergTable)
               .map(DlfToIcebergConverter::toTableId)
               .collect(Collectors.toList()));
         }
@@ -220,10 +217,12 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
 
       DeleteTableRequest request = new DeleteTableRequest()
           .setCatalogId(aliyunProperties.dlfCatalogId())
-          .setDatabaseName(IcebergToDlfConverter.toDatabaseName(identifier.namespace()))
+          .setDatabaseName(IcebergToDlfConverter.getDatabaseName(identifier))
           .setTableName(identifier.name());
 
       dlfClient.deleteTable(request);
+      LOG.info("Successfully dropped table {} from DLF", identifier);
+
       if (purge && lastMetadata != null) {
         CatalogUtil.dropTableData(ops.io(), lastMetadata);
         LOG.info("DLF table {} data purged", identifier);
@@ -252,13 +251,27 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
     }
 
     try {
+      GetTableRequest getTableRequest = new GetTableRequest()
+          .setCatalogId(aliyunProperties.dlfCatalogId())
+          .setDatabaseName(IcebergToDlfConverter.getDatabaseName(from))
+          .setTableName(IcebergToDlfConverter.getTableName(from));
+      dlfClient.getTable(getTableRequest);
+    } catch (TeaException e) {
+      if (Objects.equals(NO_SUCH_OBJECT, e.getCode())) {
+        throw new NoSuchTableException(e, "Cannot rename %s because the table does not exist in DLF", from);
+      }
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+
+    try {
       // According to the API doc, we only need to set the tableName.
       TableInput tableInput = new TableInput()
           .setTableName(to.name());
 
       RenameTableRequest renameTableRequest = new RenameTableRequest()
           .setCatalogId(aliyunProperties.dlfCatalogId())
-          .setDatabaseName(IcebergToDlfConverter.toDatabaseName(to.namespace()))
+          .setDatabaseName(IcebergToDlfConverter.getDatabaseName(to))
           .setTableInput(tableInput)
           .setTableName(from.name());
 
@@ -266,6 +279,9 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
 
       LOG.info("Successfully renamed table from {} to {}", from, to);
     } catch (TeaException e) {
+      if (e.getMessage() != null && e.getMessage().contains(String.format("Target table %s already exists", to))) {
+        throw new AlreadyExistsException("Table already exists: %s", to);
+      }
       throw e;
     } catch (Exception e) {
       throw new RuntimeException(e);
@@ -301,7 +317,7 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
       }
 
       throw new NoSuchNamespaceException(
-          "DataLakeFormat does not support nested namespace, cannot list namespaces under %s", namespace);
+          "DLF does not support nested namespace, cannot list namespaces under %s", namespace);
     }
 
     String nextPageToken = EMPTY_PAGE_TOKEN;
@@ -353,7 +369,7 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
 
     } catch (TeaException e) {
       if (Objects.equals(e.getCode(), NO_SUCH_OBJECT)) {
-        throw new NoSuchNamespaceException("DLF database does not find for namespace %s, error message: %s",
+        throw new NoSuchNamespaceException(e, "DLF database does not find for namespace %s, error message: %s",
             databaseName, e.getMessage());
       }
       throw e;
@@ -381,7 +397,7 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
 
       if (!tables.isEmpty()) {
         Table table = tables.get(0);
-        if (isDlfIcebergTable(table)) {
+        if (DlfToIcebergConverter.isDlfIcebergTable(table)) {
           throw new NamespaceNotEmptyException("Cannot drop namespace %s because it still contains iceberg tables",
               namespace);
         } else {
@@ -459,8 +475,8 @@ public class DlfCatalog extends BaseMetastoreCatalog implements Closeable, Suppo
 
   @Override
   protected boolean isValidIdentifier(TableIdentifier tableIdentifier) {
-    // TODO
-    return true;
+    return IcebergToDlfConverter.isValidNamespace(tableIdentifier.namespace()) &&
+        IcebergToDlfConverter.isValidTableName(tableIdentifier.name());
   }
 
   @Override

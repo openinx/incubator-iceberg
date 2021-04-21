@@ -49,8 +49,8 @@ import org.apache.iceberg.exceptions.CommitStateUnknownException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.io.FileIO;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
-import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,7 +64,7 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
   private static final String METASTORE_LOCK_ID = "metastore-lock-id";
 
   private final Client dlfClient;
-  private final String warehousePath;
+  private final String tableLocation;
   private final String catalogName;
   private final AliyunProperties aliyunProperties;
   private final FileIO io;
@@ -76,18 +76,18 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
   private final ThreadLocal<Long> currentLockId = new ThreadLocal<>();
 
   DlfTableOperations(Client dlfClient,
-                     String warehousePath,
+                     String tableLocation,
                      String catalogName,
                      AliyunProperties aliyunProperties,
                      FileIO io,
                      TableIdentifier tableIdentifier) {
     this.dlfClient = dlfClient;
-    this.warehousePath = warehousePath;
+    this.tableLocation = tableLocation;
     this.catalogName = catalogName;
     this.aliyunProperties = aliyunProperties;
     this.io = io;
 
-    this.databaseName = IcebergToDlfConverter.toDatabaseName(tableIdentifier.namespace());
+    this.databaseName = IcebergToDlfConverter.getDatabaseName(tableIdentifier);
     this.tableName = IcebergToDlfConverter.getTableName(tableIdentifier);
     this.fullTableName = String.format("%s.%s.%s", this.catalogName, databaseName, tableName);
   }
@@ -164,7 +164,7 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
           .setTableName(tableName);
 
       CreateLockRequest request = new CreateLockRequest()
-          .setLockObjList(Lists.newArrayList(lock));
+          .setLockObjList(ImmutableList.of(lock));
 
       CreateLockResponse response = dlfClient.createLock(request);
       LockStatus lockStatus = response.getBody().getLockStatus();
@@ -224,7 +224,7 @@ class DlfTableOperations extends BaseMetastoreTableOperations {
 
   void persistDLFTable(Schema schema, PartitionSpec spec, Long lockId, Table dlfTable, Map<String, String> parameters) {
     StorageDescriptor storageDescriptor = new StorageDescriptor()
-        .setLocation(warehousePath)
+        .setLocation(tableLocation)
         .setCols(IcebergToDlfConverter.toFieldSchemaList(schema));
 
     TableInput tableInput = new TableInput()

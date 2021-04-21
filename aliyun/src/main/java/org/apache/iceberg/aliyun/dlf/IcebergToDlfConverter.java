@@ -58,6 +58,16 @@ class IcebergToDlfConverter {
   }
 
   /**
+   * Validate and get DLF database name from iceberg {@link TableIdentifier}.
+   *
+   * @param tableIdentifier table identifier
+   * @return table name.
+   */
+  static String getDatabaseName(TableIdentifier tableIdentifier) {
+    return toDatabaseName(tableIdentifier.namespace());
+  }
+
+  /**
    * Validate and convert Iceberg namespace to DLF database name
    *
    * @param namespace Iceberg namespace

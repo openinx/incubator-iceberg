@@ -139,4 +139,5 @@ public class GlueCatalogLockTest extends GlueTestBase {
     Assert.assertEquals("Commits should all succeed sequentially", 20, table.history().size());
     Assert.assertEquals("should have 20 manifests", 20, table.currentSnapshot().allManifests().size());
   }
+
 }
