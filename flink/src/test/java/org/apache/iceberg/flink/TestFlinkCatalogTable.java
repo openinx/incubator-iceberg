@@ -240,6 +240,51 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
   }
 
   @Test
+  public void testBucketTable() {
+    sql("CREATE TABLE tl(id BIGINT, dt STRING) WITH ('%s'='bucket[8]', '%s'='bucket[10]')",
+        PartitionUtil.partitionPropKey("id"),
+        PartitionUtil.partitionPropKey("dt"));
+    Table table = table("tl");
+
+    Assert.assertEquals("Should have expected partition spec", table.spec(),
+        PartitionSpec.builderFor(table.schema())
+            .withSpecId(table.spec().specId())
+            .bucket("id", 8)
+            .bucket("dt", 10)
+            .build()
+    );
+    Assert.assertEquals(Maps.newHashMap(), table.properties());
+
+    // Alter the table to new buckets.
+    sql("ALTER TABLE tl SET ('%s'='bucket[12]')", PartitionUtil.partitionPropKey("id"));
+    table = table("tl");
+    Assert.assertEquals("Should have the expected partition spec", table.spec(),
+        PartitionSpec.builderFor(table.schema())
+            .withSpecId(table.spec().specId())
+            .alwaysNull("id", "id_bucket")
+            .alwaysNull("dt", "dt_bucket")
+            .bucket("id", 12, "id_bucket_12")
+            .build());
+    Assert.assertEquals(Maps.newHashMap(), table.properties());
+
+    // Alter the table to add new field bucket.
+    sql("ALTER TABLE tl SET ('%s'='bucket[1]', '%s'='bucket[2]')",
+        PartitionUtil.partitionPropKey("id"),
+        PartitionUtil.partitionPropKey("dt"));
+    table = table("tl");
+    Assert.assertEquals("Should have the expected partition spec", table.spec(),
+        PartitionSpec.builderFor(table.schema())
+            .withSpecId(table.spec().specId())
+            .alwaysNull("id", "id_bucket")
+            .alwaysNull("dt", "dt_bucket")
+            .alwaysNull("id", "id_bucket_12")
+            .bucket("id", 1, "id_bucket_1")
+            .bucket("dt", 2, "dt_bucket_2")
+            .build());
+    Assert.assertEquals(Maps.newHashMap(), table.properties());
+  }
+
+  @Test
   public void testLoadTransformPartitionTable() throws TableNotExistException {
     Schema schema = new Schema(Types.NestedField.optional(0, "id", Types.LongType.get()));
     validationCatalog.createTable(

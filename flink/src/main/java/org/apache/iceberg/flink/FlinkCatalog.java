@@ -61,6 +61,7 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.StructLike;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.Transaction;
+import org.apache.iceberg.UpdatePartitionSpec;
 import org.apache.iceberg.UpdateProperties;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
@@ -363,15 +364,17 @@ public class FlinkCatalog extends AbstractCatalog {
     validateFlinkTable(table);
 
     Schema icebergSchema = FlinkSchemaUtil.convert(table.getSchema());
-    PartitionSpec spec = toPartitionSpec(((CatalogTable) table).getPartitionKeys(), icebergSchema);
+    PartitionSpec.Builder specBuilder = toPartitionSpec(((CatalogTable) table).getPartitionKeys(), icebergSchema);
 
-    ImmutableMap.Builder<String, String> properties = ImmutableMap.builder();
     String location = null;
+    ImmutableMap.Builder<String, String> propsBuilder = ImmutableMap.builder();
     for (Map.Entry<String, String> entry : table.getOptions().entrySet()) {
       if ("location".equalsIgnoreCase(entry.getKey())) {
         location = entry.getValue();
+      } else if (PartitionUtil.isPartitionField(entry.getKey())) {
+        PartitionUtil.addPartitionField(icebergSchema, specBuilder, entry.getKey(), entry.getValue());
       } else {
-        properties.put(entry.getKey(), entry.getValue());
+        propsBuilder.put(entry.getKey(), entry.getValue());
       }
     }
 
@@ -379,9 +382,9 @@ public class FlinkCatalog extends AbstractCatalog {
       icebergCatalog.createTable(
           toIdentifier(tablePath),
           icebergSchema,
-          spec,
+          specBuilder.build(),
           location,
-          properties.build());
+          propsBuilder.build());
     } catch (AlreadyExistsException e) {
       if (!ignoreIfExists) {
         throw new TableAlreadyExistException(getName(), tablePath, e);
@@ -421,6 +424,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
     Map<String, String> oldProperties = table.getOptions();
     Map<String, String> setProperties = Maps.newHashMap();
+    PartitionSpec.Builder specBuilder = PartitionSpec.builderFor(icebergTable.schema());
 
     String setLocation = null;
     String setSnapshotId = null;
@@ -440,6 +444,8 @@ public class FlinkCatalog extends AbstractCatalog {
         setSnapshotId = value;
       } else if ("cherry-pick-snapshot-id".equalsIgnoreCase(key)) {
         pickSnapshotId = value;
+      } else if (PartitionUtil.isPartitionField(key)) {
+        PartitionUtil.addPartitionField(icebergTable.schema(), specBuilder, key, value);
       } else {
         setProperties.put(key, value);
       }
@@ -451,7 +457,7 @@ public class FlinkCatalog extends AbstractCatalog {
       }
     });
 
-    commitChanges(icebergTable, setLocation, setSnapshotId, pickSnapshotId, setProperties);
+    commitChanges(icebergTable, setLocation, setSnapshotId, pickSnapshotId, setProperties, specBuilder.build());
   }
 
   private static void validateFlinkTable(CatalogBaseTable table) {
@@ -469,10 +475,11 @@ public class FlinkCatalog extends AbstractCatalog {
     }
   }
 
-  private static PartitionSpec toPartitionSpec(List<String> partitionKeys, Schema icebergSchema) {
+  private static PartitionSpec.Builder toPartitionSpec(List<String> partitionKeys, Schema icebergSchema) {
     PartitionSpec.Builder builder = PartitionSpec.builderFor(icebergSchema);
     partitionKeys.forEach(builder::identity);
-    return builder.build();
+
+    return builder;
   }
 
   private static List<String> toPartitionKeys(PartitionSpec spec, Schema icebergSchema) {
@@ -491,7 +498,8 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   private static void commitChanges(Table table, String setLocation, String setSnapshotId,
-                                    String pickSnapshotId, Map<String, String> setProperties) {
+                                    String pickSnapshotId, Map<String, String> setProperties,
+                                    PartitionSpec newSpec) {
     // don't allow setting the snapshot and picking a commit at the same time because order is ambiguous and choosing
     // one order leads to different results
     Preconditions.checkArgument(setSnapshotId == null || pickSnapshotId == null,
@@ -514,6 +522,22 @@ public class FlinkCatalog extends AbstractCatalog {
       transaction.updateLocation()
           .setLocation(setLocation)
           .commit();
+    }
+
+    if (newSpec != null) {
+      UpdatePartitionSpec updatePartitionSpec = transaction.updateSpec();
+
+      // Remove the old partition fields.
+      for (PartitionField oldField : table.spec().fields()) {
+        updatePartitionSpec.removeField(PartitionUtil.toIcebergTerm(oldField.name(), oldField.transform()));
+      }
+
+      // Add the new partition fields.
+      for (PartitionField newField : newSpec.fields()) {
+        updatePartitionSpec.addField(PartitionUtil.toIcebergTerm(newField.name(), newField.transform()));
+      }
+
+      updatePartitionSpec.commit();
     }
 
     if (!setProperties.isEmpty()) {
@@ -571,7 +595,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
   @Override
   public void createPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec, CatalogPartition partition,
-      boolean ignoreIfExists) throws CatalogException {
+                              boolean ignoreIfExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
@@ -583,7 +607,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
   @Override
   public void alterPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec, CatalogPartition newPartition,
-      boolean ignoreIfNotExists) throws CatalogException {
+                             boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
@@ -622,25 +646,27 @@ public class FlinkCatalog extends AbstractCatalog {
 
   @Override
   public void alterTableStatistics(ObjectPath tablePath, CatalogTableStatistics tableStatistics,
-      boolean ignoreIfNotExists) throws CatalogException {
+                                   boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
   public void alterTableColumnStatistics(ObjectPath tablePath, CatalogColumnStatistics columnStatistics,
-      boolean ignoreIfNotExists) throws CatalogException {
+                                         boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
   public void alterPartitionStatistics(ObjectPath tablePath, CatalogPartitionSpec partitionSpec,
-      CatalogTableStatistics partitionStatistics, boolean ignoreIfNotExists) throws CatalogException {
+                                       CatalogTableStatistics partitionStatistics, boolean ignoreIfNotExists)
+      throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
   public void alterPartitionColumnStatistics(ObjectPath tablePath, CatalogPartitionSpec partitionSpec,
-      CatalogColumnStatistics columnStatistics, boolean ignoreIfNotExists) throws CatalogException {
+                                             CatalogColumnStatistics columnStatistics, boolean ignoreIfNotExists)
+      throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
